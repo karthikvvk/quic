@@ -44,10 +44,28 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                         f.write(filedata.encode() if isinstance(filedata, str) else filedata)
                     print(f"[+] Copied file to {filename}")
 
+                # elif command == "move":
+                #     if src and dest:
+                #         os.rename(os.path.join(self.out_dir, src), os.path.join(self.out_dir, dest))
+                #         print(f"[+] Moved {src} -> {dest}")
                 elif command == "move":
-                    if src and dest:
-                        os.rename(os.path.join(self.out_dir, src), os.path.join(self.out_dir, dest))
-                        print(f"[+] Moved {src} -> {dest}")
+                    filename = os.path.join(self.out_dir, dest or src)
+
+                    # Ensure the destination directory exists
+                    os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+                    # Write the file data to the destination
+                    with open(filename, "wb") as f:
+                        f.write(filedata.encode() if isinstance(filedata, str) else filedata)
+
+                    # Delete the original if it exists
+                    # old_path = os.path.join(self.out_dir, src)
+                    if os.path.exists(src):
+                        os.remove(src)
+                        print(f"[+] Deleted original file {src}")
+
+                    print(f"[+] Moved {src} -> {dest}")
+
 
                 elif command == "create":
                     if dest:
@@ -82,6 +100,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
+        # asyncio.run(main(host="0.0.0.0",port="4433",cert="cert.pem",key="key.pem"))
         asyncio.run(main(args.host, args.port, args.cert, args.key, args.out_dir))
     except KeyboardInterrupt:
         print("Server stopped")
