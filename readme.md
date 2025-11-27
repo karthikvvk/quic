@@ -122,3 +122,9 @@ If you want, I can also:
 ✅ Make a “drag & drop” UI in Streamlit for QUIC transfer
 
 Just tell me!
+
+
+
+
+openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem \
+  -days 365 -subj "/CN=quic-server.local"
