@@ -8,8 +8,7 @@ Here is **exactly how to run both the server and client** on two PCs.
 Make sure **cert.pem** and **key.pem** are in the same folder.
 
 ```bash
-python server.py --host 0.0.0.0 --port 4433 \
-    --cert cert.pem --key key.pem
+python server.py --host 0.0.0.0 --port 4433     --cert cert.pem --key key.pem
 ```
 
 If using a virtual environment:
@@ -126,5 +125,4 @@ Just tell me!
 
 
 
-openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem \
-  -days 365 -subj "/CN=quic-server.local"
+openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local"
