@@ -1,10 +1,12 @@
-import argparse
+from flask import Flask, request, jsonify
 import asyncio
 import os
 import json
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 from helper import *
+
+app = Flask(__name__)
 
 CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
@@ -60,37 +62,153 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
         await asyncio.sleep(0.5)
 
 
+@app.route('/copy', methods=['POST'])
+def copy_file():
+    """
+    Copy operation endpoint
+    POST body: {
+        "src": "filename.txt",
+        "dest": "/path/to/destination"  (optional, uses env default if not provided)
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')
+        dest = data.get('dest')
+
+        if not src:
+            return jsonify({"error": "src is required"}), 400
+
+        env = read_env_file()
+        host, port, certi, out_dir = (
+            env["host"],
+            env["port"],
+            env["certi"],
+            env["out_dir"]
+        )
+
+        dest = dest or out_dir
+
+        asyncio.run(send_command(host, port, certi, "copy", src, dest))
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Copy command sent for {src} to {dest}"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/move', methods=['POST'])
+def move_file():
+    """
+    Move operation endpoint
+    POST body: {
+        "src": "filename.txt",
+        "dest": "/path/to/destination"  (optional, uses env default if not provided)
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')
+        dest = data.get('dest')
+
+        if not src:
+            return jsonify({"error": "src is required"}), 400
+
+        env = read_env_file()
+        host, port, certi, out_dir = (
+            env["host"],
+            env["port"],
+            env["certi"],
+            env["out_dir"]
+        )
+
+        dest = dest or out_dir
+
+        asyncio.run(send_command(host, port, certi, "move", src, dest))
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Move command sent for {src} to {dest}"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/create', methods=['POST'])
+def create_file():
+    """
+    Create operation endpoint
+    POST body: {
+        "src": "filename.txt"
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')
+
+        if not src:
+            return jsonify({"error": "src is required"}), 400
+
+        env = read_env_file()
+        host, port, certi = (
+            env["host"],
+            env["port"],
+            env["certi"]
+        )
+
+        asyncio.run(send_command(host, port, certi, "create", src))
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Create command sent for {src}"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/delete', methods=['POST'])
+def delete_file():
+    """
+    Delete operation endpoint
+    POST body: {
+        "src": "filename.txt"
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')
+
+        if not src:
+            return jsonify({"error": "src is required"}), 400
+
+        env = read_env_file()
+        host, port, certi = (
+            env["host"],
+            env["port"],
+            env["certi"]
+        )
+
+        asyncio.run(send_command(host, port, certi, "delete", src))
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Delete command sent for {src}"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy"}), 200
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--command",
-        choices=["copy", "move", "create", "delete"],
-        required=True,
-        help="Operation to perform"
-    )
-    parser.add_argument("--src", help="Filename (basename) required for all commands")
-    parser.add_argument("--dest", help="Destination folder (required only for copy/move)")
-    args = parser.parse_args()
-
-    # Validation
-    if args.command in ["copy", "move"] and (not args.src):
-        parser.error("--src and --dest are required for copy/move")
-    elif args.command in ["create", "delete"] and not args.src:
-        parser.error("--src is required for create/delete")
-
-    env = read_env_file()
-    host, port, certi, out_dir, src_env, key = (
-        env["host"],
-        env["port"],
-        env["certi"],
-        env["out_dir"],
-        env["src"],
-        env["key"],
-    )
-
-    # src from CLI overrides env
-    src = args.src or src_env
-    # dest matters only for copy/move; otherwise server uses out_dir implicitly
-    dest = args.dest or out_dir
-
-    asyncio.run(send_command(host, port, certi, args.command, src, dest))
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,3 +1,4 @@
 *.pem
 received_files/
 *.txt
+send_files/
