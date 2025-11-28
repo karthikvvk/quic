@@ -78,7 +78,7 @@ if config:
         uploaded_file = st.file_uploader("Choose a file to copy", key="copy_file")
         dest_copy = st.text_input(
             "Destination folder (optional)", 
-            value=config.get('out_dir', ''),
+            value=config.get('out_dir', '.'),
             key="copy_dest",
             help="Leave empty to use default output directory"
         )
