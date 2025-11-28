@@ -4,29 +4,17 @@ import os
 import json
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
-from dotenv import load_dotenv
+from helper import *
 
 CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
 
 
-
-def write_env_file(host, port, certi):
-    with open(ENV_FILE, "w") as f:
-        f.write(f"HOST={host}\n")
-        f.write(f"PORT={port}\n")
-        f.write(f"CERTI={certi}\n")
-
-# -------------------------------
-# Function to read environment variables from .env file
-# -------------------------------
-def read_env_file():
-    load_dotenv(ENV_FILE)
-    host = os.getenv("HOST")
-    port = int(os.getenv("PORT", "4433"))  # default 4433 if not set
-    certi = os.getenv("CERTI")
-    return host, port, certi
-
+def _normalize_dest(dest: str | None) -> str | None:
+    if not dest:
+        return None
+    # strip trailing slashes and normalize
+    return os.path.normpath(dest).strip()
 
 
 async def send_command(host, port, cert_verify, command, src=None, dest=None):
@@ -38,18 +26,21 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
         stream_id = client._quic.get_next_available_stream_id(is_unidirectional=False)
         print(f"[+] sending command on stream {stream_id}")
 
-        # Build header depending on command
+        # Build header with standardized fields
         header_dict = {"command": command}
+
         if src:
+            # Always send basename only
             header_dict["src"] = os.path.basename(src)
-        if dest:
-            header_dict["dest"] = dest
+
+        if command in ["copy", "move"]:
+            header_dict["dest"] = _normalize_dest(dest)
 
         header = json.dumps(header_dict).encode()
         client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
         client.transmit()
 
-        # Copy and Move send file data
+        # Copy/Move stream file data (upload + delete semantics for move)
         if command in ["copy", "move"] and src:
             with open(src, "rb") as f:
                 while True:
@@ -61,13 +52,14 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
                     client._quic.send_stream_data(stream_id, chunk, end_stream=False)
                     client.transmit()
 
-
         elif command in ["create", "delete"]:
-            # For these, just close the stream after sending header
+            # No file data; just header
             client._quic.send_stream_data(stream_id, b"", end_stream=True)
             client.transmit()
 
         await asyncio.sleep(0.5)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -76,19 +68,29 @@ if __name__ == "__main__":
         required=True,
         help="Operation to perform"
     )
-    parser.add_argument("--src", help="Source filename (required for copy/move/delete)")
-    parser.add_argument("--dest", help="Destination filename (required for copy/move/create)")
+    parser.add_argument("--src", help="Filename (basename) required for all commands")
+    parser.add_argument("--dest", help="Destination folder (required only for copy/move)")
     args = parser.parse_args()
 
-    # Validate based on command
-    if args.command in ["copy", "move"] and (not args.src or not args.dest):
+    # Validation
+    if args.command in ["copy", "move"] and (not args.src):
         parser.error("--src and --dest are required for copy/move")
-    elif args.command == "create" and not args.dest:
-        parser.error("--dest is required for create")
-    elif args.command == "delete" and not args.src:
-        parser.error("--src is required for delete")
+    elif args.command in ["create", "delete"] and not args.src:
+        parser.error("--src is required for create/delete")
 
+    env = read_env_file()
+    host, port, certi, out_dir, src_env, key = (
+        env["host"],
+        env["port"],
+        env["certi"],
+        env["out_dir"],
+        env["src"],
+        env["key"],
+    )
 
+    # src from CLI overrides env
+    src = args.src or src_env
+    # dest matters only for copy/move; otherwise server uses out_dir implicitly
+    dest = args.dest or out_dir
 
-    host, port, certi = read_env_file()
-    asyncio.run(send_command(host, port, certi, args.command, args.src, args.dest))
+    asyncio.run(send_command(host, port, certi, args.command, src, dest))

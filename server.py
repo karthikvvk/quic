@@ -6,12 +6,26 @@ from aioquic.asyncio import serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.events import StreamDataReceived
 from aioquic.quic.configuration import QuicConfiguration
+from helper import *
+
+
+def _safe_join(base: str, *paths: str) -> str:
+    """
+    Join and normalize paths, ensuring the result stays within base.
+    Prevents path traversal via src/dest.
+    """
+    target = os.path.normpath(os.path.join(base, *[p for p in paths if p]))
+    base_norm = os.path.normpath(base)
+    if not os.path.commonpath([base_norm, target]) == base_norm:
+        raise ValueError(f"Unsafe path outside base: {target}")
+    return target
+
 
 class FileReceiverProtocol(QuicConnectionProtocol):
     def __init__(self, *args, out_dir="received_files", **kwargs):
         super().__init__(*args, **kwargs)
-        self.out_dir = out_dir
-        self._streams = {}  # stream_id -> bytearray
+        self.out_dir = out_dir or "received_files"
+        self._streams = {}
 
     def quic_event_received(self, event):
         if isinstance(event, StreamDataReceived):
@@ -23,59 +37,79 @@ class FileReceiverProtocol(QuicConnectionProtocol):
             self._streams[stream_id].extend(data)
 
             if event.end_stream:
-                payload = self._streams.pop(stream_id).decode(errors="ignore")
-                header, _, filedata = payload.partition("\n")
+                payload = self._streams.pop(stream_id)
+                # Split header and body at first newline byte
+                header_bytes, sep, filedata = payload.partition(b"\n")
 
                 try:
-                    cmd = json.loads(header)
+                    cmd = json.loads(header_bytes.decode("utf-8", errors="ignore"))
                 except Exception as e:
                     print(f"[!] Invalid header: {e}")
                     return
 
-                src = cmd.get("src")
-                dest = cmd.get("dest")
+                src = os.path.basename(cmd.get("src") or "")  # filename only
+                dest = cmd.get("dest")                        # folder name (for copy/move)
                 command = cmd.get("command")
 
+                # Ensure base output directory exists
                 os.makedirs(self.out_dir, exist_ok=True)
 
-                if command == "copy":
-                    filename = os.path.join(self.out_dir, dest or src)
-                    with open(filename, "wb") as f:
-                        f.write(filedata.encode() if isinstance(filedata, str) else filedata)
-                    print(f"[+] Copied file to {filename}")
+                try:
+                    if command == "copy":
+                        folder = _safe_join(self.out_dir, dest or "")
+                        os.makedirs(folder, exist_ok=True)
+                        filename = _safe_join(folder, src)
+                        with open(filename, "wb") as f:
+                            f.write(filedata)
+                        print(f"[+] Copied file to {filename}")
 
-                # elif command == "move":
-                #     if src and dest:
-                #         os.rename(os.path.join(self.out_dir, src), os.path.join(self.out_dir, dest))
-                #         print(f"[+] Moved {src} -> {dest}")
-                elif command == "move":
-                    filename = os.path.join(self.out_dir, dest or src)
+                    elif command == "move":
+                        # Write to dest folder
+                        folder = _safe_join(self.out_dir, dest or "")
+                        os.makedirs(folder, exist_ok=True)
+                        filename = _safe_join(folder, src)
+                        with open(filename, "wb") as f:
+                            f.write(filedata)
 
-                    # Ensure the destination directory exists
-                    os.makedirs(os.path.dirname(filename), exist_ok=True)
+                        # Delete original from out_dir root
+                        old_path = src#_safe_join(self.out_dir, src)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                            print(f"[+] Deleted original file {old_path}")
+                        else:
+                            print(f"[!] No original file {old_path} to delete")
 
-                    # Write the file data to the destination
-                    with open(filename, "wb") as f:
-                        f.write(filedata.encode() if isinstance(filedata, str) else filedata)
+                        print(f"[+] Moved {src} -> {filename}")
 
-                    # Delete the original if it exists
-                    # old_path = os.path.join(self.out_dir, src)
-                    if os.path.exists(src):
-                        os.remove(src)
-                        print(f"[+] Deleted original file {src}")
+                    elif command == "create":
+                        # Create src under out_dir
+                        if not src:
+                            print("[!] Missing src for create")
+                            return
+                        filename = _safe_join(self.out_dir, src)
+                        open(filename, "w").close()
+                        print(f"[+] Created empty file {filename}")
 
-                    print(f"[+] Moved {src} -> {dest}")
+                    elif command == "delete":
+                        # Delete src under out_dir
+                        if not src:
+                            print("[!] Missing src for delete")
+                            return
+                        filename = _safe_join(self.out_dir, src)
+                        if os.path.exists(filename):
+                            os.remove(filename)
+                            print(f"[+] Deleted {filename}")
+                        else:
+                            print(f"[!] File not found: {filename}")
 
+                    else:
+                        print(f"[!] Unknown command: {command}")
 
-                elif command == "create":
-                    if dest:
-                        open(os.path.join(self.out_dir, dest), "w").close()
-                        print(f"[+] Created empty file {dest}")
+                except ValueError as ve:
+                    print(f"[!] Path error: {ve}")
+                except Exception as e:
+                    print(f"[!] Operation error: {e}")
 
-                elif command == "delete":
-                    if src:
-                        os.remove(os.path.join(self.out_dir, src))
-                        print(f"[+] Deleted {src}")
 
 async def main(host, port, cert, key, out_dir):
     print(f"Starting QUIC server on {host}:{port}")
@@ -90,6 +124,7 @@ async def main(host, port, cert, key, out_dir):
     )
     await asyncio.Future()
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
@@ -100,7 +135,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        # asyncio.run(main(host="0.0.0.0",port="4433",cert="cert.pem",key="key.pem"))
-        asyncio.run(main(args.host, args.port, args.cert, args.key, args.out_dir))
+        env = read_env_file()
+        host, port, certi, out_dir, src_env, key = (
+            env["host"],
+            env["port"],
+            env["certi"],
+            env["out_dir"],
+            env["src"],
+            env["key"],
+        )
+        asyncio.run(main(host, port, certi, key, out_dir or args.out_dir))
     except KeyboardInterrupt:
         print("Server stopped")
