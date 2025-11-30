@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import os
 import json
@@ -6,7 +5,7 @@ from aioquic.asyncio import serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.events import StreamDataReceived
 from aioquic.quic.configuration import QuicConfiguration
-from startsetup import *
+from startsetup import load_env_vars
 
 
 def _safe_join(base: str, *paths: str) -> str:
@@ -22,9 +21,9 @@ def _safe_join(base: str, *paths: str) -> str:
 
 
 class FileReceiverProtocol(QuicConnectionProtocol):
-    def __init__(self, *args, out_dir="received_files", **kwargs):
+    def __init__(self, *args, out_dir=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.out_dir = out_dir or "received_files"
+        self.out_dir = out_dir
         self._streams = {}
 
     def quic_event_received(self, event):
@@ -72,7 +71,7 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                             f.write(filedata)
 
                         # Delete original from out_dir root
-                        old_path = src#_safe_join(self.out_dir, src)
+                        old_path = src
                         if os.path.exists(old_path):
                             os.remove(old_path)
                             print(f"[+] Deleted original file {old_path}")
@@ -113,6 +112,9 @@ class FileReceiverProtocol(QuicConnectionProtocol):
 
 async def main(host, port, cert, key, out_dir):
     print(f"Starting QUIC server on {host}:{port}")
+    print(f"Certificate: {cert}")
+    print(f"Output directory: {out_dir}")
+    
     configuration = QuicConfiguration(is_client=False)
     configuration.load_cert_chain(cert, key)
 
@@ -126,24 +128,20 @@ async def main(host, port, cert, key, out_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=4433)
-    parser.add_argument("--cert", default="cert.pem")
-    parser.add_argument("--key", default="key.pem")
-    parser.add_argument("--out-dir", default="received_files")
-    args = parser.parse_args()
-
     try:
+        # Load all configuration from environment variables
         env = load_env_vars()
-        host, port, certi, out_dir, src_env, key = (
-            env["host"],
-            env["port"],
-            env["certi"],
-            env["out_dir"],
-            env["src"],
-            env["key"],
-        )
-        asyncio.run(main(host, port, certi, key, out_dir or args.out_dir))
+        
+        host = env["host"]
+        port = int(env["port"])
+        cert = env["certi"]
+        key = env["key"]
+        out_dir = env["out_dir"]
+        
+        asyncio.run(main(host, port, cert, key, out_dir))
     except KeyboardInterrupt:
-        print("Server stopped")
+        print("\nServer stopped")
+    except KeyError as e:
+        print(f"[!] Missing required environment variable: {e}")
+    except Exception as e:
+        print(f"[!] Error starting server: {e}")

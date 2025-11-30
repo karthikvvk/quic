@@ -24,39 +24,9 @@ certi = os.path.join(pwd, "cert.pem")
 dest_host = ""
 
 
-def update_curr_ipcidr():
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host    
-    if sys.startswith("linux"):
-        host_ip = None
-        cidr = None
-        block = re.search(rf'{interface}:.*?(?=^\d+:|\Z)', result, re.DOTALL | re.MULTILINE)
-        if block:
-            m = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)', block.group(0))
-            if m:
-                host_ip = m.group(1)
-                cidr = m.group(2)
-                print("host_ip:", host_ip, "/", cidr)
-        # cidr = 24
-    else:
-        cmd = [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"(Get-NetIPAddress -InterfaceAlias '{interface}' -AddressFamily IPv4).IPAddress"
-        ]
-        host_ip = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
-        cmd = [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"(Get-NetIPAddress -InterfaceAlias '{interface}' -AddressFamily IPv4).PrefixLength"
-        ]
-        cidr = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
-        print("Current system IP:", host_ip, "/", cidr)
-
 
 def detect_interface():
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
     if sys.startswith("linux"):
         result = subprocess.check_output(["ip", "a"], text=True)
@@ -91,7 +61,7 @@ def detect_interface():
 
 def get_network_info():
     """Get dynamic network information using only socket module"""
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
 
     # Get the default IP by connecting to an external address
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -149,7 +119,7 @@ def get_network_info():
 
 def load_env_vars():
     """Load environment variables from .env file into global variables"""
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
     load_dotenv()
     
@@ -171,17 +141,33 @@ def load_env_vars():
     dest_host = os.getenv("DEST_HOST", "")
     
     print(f"[+] Loaded environment variables from .env")
-    return host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    return {
+        "host": host_ip,
+        "port": port,
+        "certi": certi,
+        "key": key,
+        "out_dir": out_dir,
+        "src": src_dir,
+        "interface": interface,
+        "system": sys,
+        "pwd": pwd,
+        "user": user,
+        "subnet": subnet,
+        "gateway": gateway,
+        "broadcast": broadcast_address,
+        "cidr": cidr,
+        "dest_host": dest_host
+    }
 
 
 def update_env():
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
 
 
 
 def write_env():
-    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
