@@ -135,7 +135,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi, out_dir, src_env, key = (
             env["host"],
             env["port"],

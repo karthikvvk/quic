@@ -12,13 +12,6 @@ CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
 
 
-def _normalize_dest(dest: str | None) -> str | None:
-    if not dest:
-        return None
-    # strip trailing slashes and normalize
-    return os.path.normpath(dest).strip()
-
-
 async def send_command(host, port, cert_verify, command, src=None, dest=None):
     config = QuicConfiguration(is_client=True, verify_mode=0)
     if cert_verify:
@@ -32,11 +25,12 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
         header_dict = {"command": command}
 
         if src:
-            # Always send basename only
-            header_dict["src"] = os.path.basename(src)
+            # Send exactly as provided - no basename, no normalization
+            header_dict["src"] = src
 
-        if command in ["copy", "move"]:
-            header_dict["dest"] = _normalize_dest(dest)
+        if command in ["copy", "move"] and dest:
+            # Send exactly as provided - no normalization
+            header_dict["dest"] = dest
 
         header = json.dumps(header_dict).encode()
         client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
@@ -79,7 +73,7 @@ def copy_file():
         if not src:
             return jsonify({"error": "src is required"}), 400
 
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi, out_dir = (
             env["host"],
             env["port"],
@@ -117,7 +111,7 @@ def move_file():
         if not src:
             return jsonify({"error": "src is required"}), 400
 
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi, out_dir = (
             env["host"],
             env["port"],
@@ -153,7 +147,7 @@ def create_file():
         if not src:
             return jsonify({"error": "src is required"}), 400
 
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi = (
             env["host"],
             env["port"],
@@ -186,7 +180,7 @@ def delete_file():
         if not src:
             return jsonify({"error": "src is required"}), 400
 
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi = (
             env["host"],
             env["port"],

@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import os
-from startsetup import read_env_file
+from startsetup import load_env_vars
 
 # Page configuration
 st.set_page_config(
@@ -16,7 +16,7 @@ API_BASE_URL = "http://localhost:5000"  # Flask API URL
 def load_config():
     """Load configuration from .env file"""
     try:
-        env = read_env_file()
+        env = load_env_vars()
         return env
     except Exception as e:
         st.error(f"Error loading configuration: {e}")

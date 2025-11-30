@@ -150,9 +150,9 @@ def run_remote_command(command: str):
     exit_status = stdout.channel.recv_exit_status()
     return exit_status, output, error
 
-# ---- Environment reader for new endpoints (read_env_file) ----
+# ---- Environment reader for new endpoints (load_env_vars) ----
 
-def read_env_file(env_path: str = ".env") -> dict:
+def load_env_vars(env_path: str = ".env") -> dict:
     load_dotenv(env_path)
     env = {
         "host": os.getenv("HOST", "127.0.0.1"),
@@ -218,7 +218,7 @@ def copy_file():
         dest = data.get('dest')
         if not src:
             return jsonify({"error": "src is required"}), 400
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi, out_dir = env["host"], env["port"], env["certi"], env["out_dir"]
         dest = dest or out_dir
         asyncio.run(send_command(host, port, certi, "copy", src, dest))
@@ -235,7 +235,7 @@ def move_file():
         dest = data.get('dest')
         if not src:
             return jsonify({"error": "src is required"}), 400
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi, out_dir = env["host"], env["port"], env["certi"], env["out_dir"]
         dest = dest or out_dir
         asyncio.run(send_command(host, port, certi, "move", src, dest))
@@ -251,7 +251,7 @@ def create_file():
         src = data.get('src')
         if not src:
             return jsonify({"error": "src is required"}), 400
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi = env["host"], env["port"], env["certi"]
         asyncio.run(send_command(host, port, certi, "create", src))
         return jsonify({"status": "success", "message": f"Create command sent for {src}"}), 200
@@ -266,7 +266,7 @@ def delete_file():
         src = data.get('src')
         if not src:
             return jsonify({"error": "src is required"}), 400
-        env = read_env_file()
+        env = load_env_vars()
         host, port, certi = env["host"], env["port"], env["certi"]
         asyncio.run(send_command(host, port, certi, "delete", src))
         return jsonify({"status": "success", "message": f"Delete command sent for {src}"}), 200

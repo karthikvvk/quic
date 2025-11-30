@@ -21,7 +21,7 @@ def write_env_file(host, port, certi, out_dir=None, src=None, key=None):
 # -------------------------------
 # Function to read environment variables from .env file
 # -------------------------------
-def read_env_file():
+def load_env_vars():
     load_dotenv(ENV_FILE)
     env_vars = {
         "host": os.getenv("HOST"),
