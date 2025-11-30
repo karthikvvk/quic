@@ -2,3 +2,5 @@
 received_files/
 *.txt
 send_files/
+dump/
+__pycache__/

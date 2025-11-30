@@ -6,7 +6,7 @@ from aioquic.asyncio import serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.events import StreamDataReceived
 from aioquic.quic.configuration import QuicConfiguration
-from helper import *
+from startsetup import *
 
 
 def _safe_join(base: str, *paths: str) -> str:

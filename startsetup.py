@@ -1,5 +1,4 @@
 import socket, struct
-import ipaddress
 import getpass
 import os
 import platform
@@ -184,7 +183,9 @@ def update_env():
 def write_env():
     global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     detect_interface()
-
+    ls = os.listdir(pwd)
+    if "key.pem" not in ls or "cert.pem" not in ls:
+        os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
     get_network_info()
     env_vars = {
         "DEFAULTIP": host_ip,

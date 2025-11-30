@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import os
-from helper import read_env_file
+from startsetup import read_env_file
 
 # Page configuration
 st.set_page_config(
