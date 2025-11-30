@@ -1,8 +1,5 @@
 streamlit
-paramiko
 requests
 flask
 dotenv
-elevate
-scapy
 ipaddress

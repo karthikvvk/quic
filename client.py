@@ -204,5 +204,13 @@ def health_check():
     return jsonify({"status": "healthy"}), 200
 
 
+
+@app.route('/listdir', methods=['POST'])
+def list_directory():
+    data = request.get_json()
+    path = data.get("cdir")
+    os.listdir(path)
+    return jsonify({"status": "success", "files": os.listdir(path)}), 200
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)
