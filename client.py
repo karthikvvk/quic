@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Flask, request, jsonify
 import asyncio
 import os
@@ -207,10 +208,50 @@ def health_check():
 
 @app.route('/listdir', methods=['POST'])
 def list_directory():
-    data = request.get_json()
-    path = data.get("cdir")
-    os.listdir(path)
-    return jsonify({"status": "success", "files": os.listdir(path)}), 200
+    """
+    POST body: {"cdir": "/path/to/check"}
+    Responses (JSON):
+      - directory: {"status":"success","type":"directory","files":["a","b",...]}
+      - file:      {"status":"success","type":"file","info": {"name": "...", "size": 1234, "mtime": "..."}}
+      - error:     {"status":"error","message":"..."}
+    """
+    try:
+        data = request.get_json() or {}
+        path = data.get("cdir")
+        if not path:
+            return jsonify({"status": "error", "message": "cdir is required"}), 400
+
+        # normalize the path (but keep absolute paths if user provided them)
+        path = os.path.normpath(path)
+
+        if not os.path.exists(path):
+            return jsonify({"status": "error", "message": f"Path does not exist: {path}"}), 404
+
+        if os.path.isfile(path):
+            st = os.stat(path)
+            info = {
+                "name": os.path.basename(path),
+                "path": path,
+                "size": st.st_size,
+                "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
+            }
+            return jsonify({"status": "success", "type": "file", "info": info}), 200
+
+        if os.path.isdir(path):
+            try:
+                items = sorted(os.listdir(path))
+            except PermissionError:
+                return jsonify({"status": "error", "message": "Permission denied"}), 403
+            except Exception as e:
+                return jsonify({"status": "error", "message": f"Listing failed: {str(e)}"}), 500
+
+            return jsonify({"status": "success", "type": "directory", "files": items}), 200
+
+        # fallback: unknown type
+        return jsonify({"status": "error", "message": f"Unknown filesystem object: {path}"}), 400
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)
