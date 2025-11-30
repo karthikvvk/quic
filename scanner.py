@@ -1,127 +1,215 @@
 import getpass
 import os
-import subprocess, platform
-from dotenv import load_dotenv
+import subprocess
+import platform
 import re
-from elevate import elevate
+import threading
+from dotenv import load_dotenv
 
+# Global variables
 host_ip = ""
 cidr = ""
 gateway = ""
-scanner_ip = ""
+subnet = ""
+broadcast = ""
 interface = ""
 system_name = ""
 user = ""
-cpfiledest = ""
 pwd = ""
+dest_host = ""
 file_path = ""
-CHOOSENIP = ""
+
 
 def load_env():
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, CHOOSENIP
+    """Load environment variables from .env file"""
+    global host_ip, cidr, gateway, subnet, broadcast, interface, system_name, user, pwd, dest_host
+    
     load_dotenv()
-    host_ip = os.getenv("DEFAULTIP", "172.18.0.2")
-    cidr = os.getenv("CIDR", "16")
-    gateway = os.getenv("GATEWAY", "172.18.0.1")
-    scanner_ip = os.getenv("SCANNER", "172.18.0.200")
-    interface = os.getenv("INTERFACE", None)
+    
+    # Load from .env with appropriate defaults
+    host_ip = os.getenv("DEFAULTIP", "")
+    cidr = os.getenv("CIDR", "24")
+    gateway = os.getenv("GATEWAY", "")
+    subnet = os.getenv("SUBNET", "255.255.255.0")
+    broadcast = os.getenv("BROADCAST", "")
+    interface = os.getenv("INTERFACE", "")
     system_name = os.getenv("SYSTEM", platform.system().lower())
     user = os.getenv("USER", getpass.getuser())
-    cpfiledest = os.getenv("COPYFILEPATH", None)
     pwd = os.getenv("PWD", os.getcwd())
-    CHOOSENIP = os.getenv("CHOOSENIP", os.getcwd())
+    dest_host = os.getenv("DEST_HOST", "")
+    
+    print(f"[+] Loaded scanner environment variables")
+    print(f"    Network: {gateway}/{cidr}")
+    print(f"    Interface: {interface}")
+    print(f"    System: {system_name}")
 
-    # set_key(os.path.join(pwd, ".env"), "CHOOSENIP", scanner_ip)
 
 def checkfile():
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
-    if os.path.exists(file_path):
-        pass
-    else:
-        # os.create_file(file_path)
+    """Ensure the IP list file exists"""
+    global file_path
+    if not os.path.exists(file_path):
         open(file_path, "w").close()
+        print(f"[+] Created {file_path}")
+
 
 def gethostlist():
+    """Main function to scan network and return list of hosts"""
+    global file_path, system_name
+    
     load_env()
-    # if f"{CHOOSENIP}".endswith("200"):
-    #     print(CHOOSENIP)
-    #     pass
-    # else:
-    #     print(CHOOSENIP, "in else")
-    #     # elevate()
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
-    file_path = os.path.join(os.getcwd(), "ipsn.txt")
+    
+    file_path = os.path.join(pwd, "ipsn.txt")
+    
     if system_name.startswith("lin"):
         return scanfromlinux()
     elif system_name.startswith("win") or system_name.startswith("nt"):
         return scanfromwin()
+    else:
+        print(f"[!] Unsupported system: {system_name}")
+        return []
+
 
 def scanfromlinux():
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    """Scan network using nmap on Linux"""
+    global gateway, cidr, file_path
+    
     checkfile()
-    # print("inside the scanner", os.getcwd())
-    subnet = f"{gateway}/{cidr}"
-    result = subprocess.check_output(["nmap", "-sn", "-PR", "-n", subnet], text=True)
-    # print(result, "the result from the scanner")
-    unique_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', result)
-    append_host(unique_ips)
-    return unique_ips
+    
+    network = f"{gateway}/{cidr}"
+    print(f"[*] Scanning network: {network}")
+    
+    try:
+        result = subprocess.check_output(
+            ["nmap", "-sn", "-PR", "-n", network], 
+            text=True,
+            stderr=subprocess.DEVNULL
+        )
+        
+        unique_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', result)
+        unique_ips = list(set(unique_ips))
+        
+        print(f"[+] Found {len(unique_ips)} hosts")
+        append_host(unique_ips)
+        return unique_ips
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[!] nmap error: {e}")
+        return []
+    except FileNotFoundError:
+        print("[!] nmap not found. Please install: sudo apt install nmap")
+        return []
 
-
-import threading
-import subprocess
 
 def ping_silent(ip):
-    subprocess.run(
-        ["ping", "-w1", ip],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-
-
-
+    """Silent ping for Windows scanning"""
+    try:
+        subprocess.run(
+            ["ping", "-n", "1", "-w", "100", ip],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=1
+        )
+    except:
+        pass
 
 
 def scanfromwin():
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    """Scan network using ping + arp on Windows"""
+    global gateway, cidr, file_path
+    
     checkfile()
-
+    
+    # Calculate network range based on gateway and CIDR
+    if cidr == "24":
+        # For /24 networks, scan the same subnet as gateway
+        base = gateway.rsplit('.', 1)[0] + "."
+        start, end = 1, 255
+    elif cidr == "16":
+        # For /16 networks, might need different approach
+        parts = gateway.split('.')
+        base = f"{parts[0]}.{parts[1]}."
+        # For simplicity, scan current /24 subnet only
+        base = gateway.rsplit('.', 1)[0] + "."
+        start, end = 1, 255
+    else:
+        # Default to /24 subnet
+        base = gateway.rsplit('.', 1)[0] + "."
+        start, end = 1, 255
+    
+    print(f"[*] Scanning network: {base}0/{cidr}")
+    print(f"[*] Pinging {end - start} addresses...")
+    
     threads = []
-
-    # Example: replace gateway/cidr with actual network base
-    # Assuming the network is 172.18.0.x
-    base = gateway.rsplit('.', 1)[0] + "."
-
-    for i in range(1, 255):
+    for i in range(start, end + 1):
         ip = base + str(i)
         thr = threading.Thread(target=ping_silent, args=(ip,))
         threads.append(thr)
-
+    
+    # Start all threads
     for thr in threads:
         thr.start()
-
+    
+    # Wait for all threads to complete
     for thr in threads:
         thr.join()
+    
+    print("[*] Ping sweep complete, checking ARP cache...")
+    
+    # Get ARP table
+    try:
+        result = subprocess.run(
+            ["arp", "-a"], 
+            capture_output=True, 
+            text=True,
+            timeout=5
+        )
+        output = result.stdout
+        
+        # Extract all IPs from ARP output
+        ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', output)
+        unique_ips = list(set(ips))
+        
+        # Filter to only include IPs in our network range
+        if cidr == "24":
+            unique_ips = [ip for ip in unique_ips if ip.startswith(base)]
+        
+        print(f"[+] Found {len(unique_ips)} hosts")
+        append_host(unique_ips)
+        return unique_ips
+        
+    except subprocess.TimeoutExpired:
+        print("[!] ARP command timed out")
+        return []
+    except Exception as e:
+        print(f"[!] Error reading ARP table: {e}")
+        return []
 
-   
-    result = subprocess.run(["arp", "-a"], capture_output=True, text=True)
-    output = result.stdout
-    ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', output)
-    unique_ips = list(set(ips))
-    append_host(unique_ips)  
-    return unique_ips
 
 def append_host(lis):
-    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    """Append discovered IPs to the host list file"""
+    global file_path, pwd
+    
     checkfile()
-    fh = open(file_path, "r")
-    data = fh.readlines()
-    fh.close()
-    existing_ips = list(set(line.strip() for line in data))
-    total_ips = set(existing_ips + lis)
-    fh = open(file_path, "w")
-    for ip in total_ips:
-        fh.write(ip + "\n")
-    fh.close()
-    os.system(f"cp  {file_path} {cpfiledest}")
-# print(gethostlist())
+    
+    try:
+        # Read existing IPs
+        with open(file_path, "r") as fh:
+            data = fh.readlines()
+        
+        existing_ips = set(line.strip() for line in data if line.strip())
+        
+        # Combine with new IPs
+        total_ips = existing_ips.union(set(lis))
+        
+        # Write back sorted list
+        with open(file_path, "w") as fh:
+            for ip in sorted(total_ips, key=lambda x: [int(p) for p in x.split('.')]):
+                fh.write(ip + "\n")
+        
+        print(f"[+] Updated {file_path} with {len(total_ips)} total hosts")
+        
+    except Exception as e:
+        print(f"[!] Error updating host list: {e}")
+
+
+print(gethostlist())
