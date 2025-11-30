@@ -99,12 +99,12 @@ def load_latest_host():
 
 def check_subnet(ip: str) -> bool:
     # Load the default IP from environment variable
-    default_ip = os.getenv("DEFAULTIP")
-    if not default_ip:
+    host_ip = os.getenv("DEFAULTIP")
+    if not host_ip:
         raise ValueError("DEFAULTIP environment variable not set")
 
     ip_parts = ip.strip().split('.')
-    default_parts = default_ip.strip().split('.')
+    default_parts = host_ip.strip().split('.')
     ed = ip_parts[-1]
     # avoid special hosts
     if ed in ('1', '200', '255'):

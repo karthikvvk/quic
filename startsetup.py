@@ -1,3 +1,4 @@
+import socket, struct
 import ipaddress
 import getpass
 import os
@@ -6,60 +7,37 @@ import re, subprocess
 from dotenv import set_key, load_dotenv
 
 
-# Global variables
-dirs = os.listdir()
 pwd = os.getcwd()
 user = getpass.getuser()
 sys = platform.system().lower()
-copyfilepath = os.path.join(pwd, "ipsn.txt")
-interface = None
-laytodir = "pages"
-laytofil = "2_File_Manager.py"
-lastip = ""
-lastcidr = ''
-result = None
-cmd = None
 
-# Network-related global variables
-network = None
-network_address = None
-subnet_mask = None
+interface = None
+subnet = None
 broadcast_address = None
 gateway = None
-default_ip = None
-scanner_ip = None
-chosen_ip = None
-max_hosts = None
-
-lis = ['.env', '1_Select_Host.py', 'server.py', 'requirement.txtt', 'scanner.py', 'startsetup.py', 'set_static_ip.py']
-for i in lis:
-    if i in dirs:
-        pass
-    else:
-        print(f"Critical File {i} are not Available!!")
-        exit()
-
-if os.path.exists(os.path.join(pwd, laytodir, laytofil)):
-    pass
-else:
-    print(f"Critical File {pwd}/pages/2_File_Manager.py are not Available!!")
-    exit()
+host_ip = None
+cidr = None
+port = 4433
+out_dir = pwd
+src_dir = pwd
+key = os.path.join(pwd, "key.pem")
+certi = os.path.join(pwd, "cert.pem")
+dest_host = ""
 
 
 def update_curr_ipcidr():
-    global lastip, lastcidr, result, cmd, interface, sys
-    
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host    
     if sys.startswith("linux"):
-        lastip = None
-        lastcidr = None
+        host_ip = None
+        cidr = None
         block = re.search(rf'{interface}:.*?(?=^\d+:|\Z)', result, re.DOTALL | re.MULTILINE)
         if block:
             m = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)', block.group(0))
             if m:
-                lastip = m.group(1)
-                lastcidr = m.group(2)
-                print("lastip:", lastip, "/", lastcidr)
-        # lastcidr = 24
+                host_ip = m.group(1)
+                cidr = m.group(2)
+                print("host_ip:", host_ip, "/", cidr)
+        # cidr = 24
     else:
         cmd = [
             "powershell",
@@ -67,19 +45,19 @@ def update_curr_ipcidr():
             "-Command",
             f"(Get-NetIPAddress -InterfaceAlias '{interface}' -AddressFamily IPv4).IPAddress"
         ]
-        lastip = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
+        host_ip = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
         cmd = [
             "powershell",
             "-NoProfile",
             "-Command",
             f"(Get-NetIPAddress -InterfaceAlias '{interface}' -AddressFamily IPv4).PrefixLength"
         ]
-        lastcidr = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
-        print("Current system IP:", lastip, "/", lastcidr)
+        cidr = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="ignore").strip()
+        print("Current system IP:", host_ip, "/", cidr)
 
 
 def detect_interface():
-    global interface, result, cmd, sys
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
     if sys.startswith("linux"):
         result = subprocess.check_output(["ip", "a"], text=True)
@@ -92,7 +70,6 @@ def detect_interface():
                 break
         if not interface:
             raise Exception("[-] No Ethernet interface found")
-        update_curr_ipcidr()
         
     elif sys.startswith("win") or sys.startswith("nt"):
         cmd = [
@@ -110,14 +87,70 @@ def detect_interface():
                 break
         if not interface:
             raise Exception("[-] No Ethernet interface found")
-        update_curr_ipcidr()
+
+
+
+def get_network_info():
+    """Get dynamic network information using only socket module"""
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+
+    # Get the default IP by connecting to an external address
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Connect to external address (doesn't actually send data)
+        s.connect(("8.8.8.8", 80))
+        host_ip = s.getsockname()[0]
+    finally:
+        s.close()
+    
+    # Convert IP to integer for calculations
+    ip_int = struct.unpack("!I", socket.inet_aton(host_ip))[0]
+    
+    # Try to get subnet mask (this is platform-dependent but works in most cases)
+    # Assuming common /24 network - we'll detect based on IP class
+    ip_parts = list(map(int, host_ip.split('.')))
+    
+    # Determine subnet based on private IP ranges
+    if ip_parts[0] == 10:  # Class A private
+        subnet = "255.0.0.0"
+        cidr = "8"
+    elif ip_parts[0] == 172 and 16 <= ip_parts[1] <= 31:  # Class B private
+        subnet = "255.255.0.0"
+        cidr = "16"
+    elif ip_parts[0] == 192 and ip_parts[1] == 168:  # Class C private
+        subnet = "255.255.255.0"
+        cidr = "24"
+    else:  # Default to /24
+        subnet = "255.255.255.0"
+        cidr = "24"
+    
+    # Calculate network address
+    subnet_int = struct.unpack("!I", socket.inet_aton(subnet))[0]
+    network_int = ip_int & subnet_int
+    
+    # Calculate broadcast address
+    broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
+    
+    # Calculate gateway (typically .1 on the network)
+    gateway_int = network_int + 1
+    
+    # Convert back to IP strings
+    gateway = socket.inet_ntoa(struct.pack("!I", gateway_int))
+    broadcast = socket.inet_ntoa(struct.pack("!I", broadcast_int))
+    
+    return {
+        "DEFAULTIP": host_ip,
+        "SUBNET": subnet,
+        "CIDR": cidr,
+        "GATEWAY": gateway,
+        "BROADCAST": broadcast
+    }
+
 
 
 def load_env_vars():
     """Load environment variables from .env file into global variables"""
-    global lastip, lastcidr, pwd, user, sys, interface, copyfilepath
-    global network, network_address, subnet_mask, broadcast_address
-    global gateway, default_ip, scanner_ip, chosen_ip, max_hosts
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
     load_dotenv()
     
@@ -126,92 +159,50 @@ def load_env_vars():
     user = os.getenv("USER", getpass.getuser())
     sys = os.getenv("SYSTEM", platform.system().lower())
     interface = os.getenv("INTERFACE", interface)
-    copyfilepath = os.getenv("COPYFILEPATH", copyfilepath)
-    
-    # Load network variables (but will be overridden by current system values)
-    default_ip = os.getenv("DEFAULTIP", "")
-    subnet_mask = os.getenv("SUBNET", "")
+    host_ip = os.getenv("DEFAULTIP", "")
+    subnet = os.getenv("SUBNET", "")
     gateway = os.getenv("GATEWAY", "")
     broadcast_address = os.getenv("BROADCAST", "")
-    scanner_ip = os.getenv("SCANNER", "")
-    chosen_ip = os.getenv("CHOOSENIP", "")
+    cidr = os.getenv("CIDR", "")
+    port = int(os.getenv("PORT", "4433"))
+    out_dir = os.getenv("OUTDIR", "")
+    src_dir = os.getenv("SRCDIR", "")
+    certi = os.getenv("CERTI", "")
+    key = os.getenv("KEY", "")
+    dest_host = os.getenv("DEST_HOST", "")
     
     print(f"[+] Loaded environment variables from .env")
-    return True
+    return host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
 
 
 def update_env():
-    global lastip, lastcidr, pwd, user, sys, interface, copyfilepath
-    global network, network_address, subnet_mask, broadcast_address
-    global gateway, default_ip, scanner_ip, chosen_ip, max_hosts
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
     
-    # First, load env vars (but IP will be overridden)
-    load_env_vars()
-    
-    # NOW detect interface and get CURRENT system IP - this overrides env values
-    detect_interface()
-    
-    # Ensure CIDR is set
-    if not lastcidr:
-        lastcidr = '24'
-    
-    # Calculate network parameters based on CURRENT detected IP and CIDR
-    if lastip and lastcidr:
-        # Create network object
-        network = ipaddress.IPv4Network(f"{lastip}/{lastcidr}", strict=False)
-        
-        # Calculate network parameters
-        network_address = str(network.network_address)
-        subnet_mask = str(network.netmask)
-        broadcast_address = str(network.broadcast_address)
-        
-        # Calculate default gateway (typically first usable IP)
-        gateway = str(network.network_address + 1)
-        
-        # Calculate default IP (second usable IP)
-        default_ip = str(network.network_address + 2)
-        
-        # Calculate scanner IP (example: .200 in the network, or last-50 if network is small)
-        max_hosts = network.num_addresses - 2  # Exclude network and broadcast
-        if max_hosts >= 200:
-            scanner_ip = str(network.network_address + 200)
-        else:
-            scanner_ip = str(network.broadcast_address - 50)
-        
-        # Calculate chosen IP (example: .10 in the network)
-        if max_hosts >= 10:
-            chosen_ip = str(network.network_address + 10)
-        else:
-            chosen_ip = str(network.network_address + 2)
-        
-        print(f"\nNetwork Configuration:")
-        print(f"Current System IP: {lastip}/{lastcidr}")
-        print(f"Network: {network}")
-        print(f"Default IP: {default_ip}")
-        print(f"Subnet Mask: {subnet_mask}")
-        print(f"Gateway: {gateway}")
-        print(f"Broadcast: {broadcast_address}")
-        print(f"Scanner IP: {scanner_ip}")
-        print(f"Chosen IP: {chosen_ip}")
-    else:
-        raise Exception("[-] Could not detect IP address and CIDR")
 
-    # Prepare environment variables
+
+
+def write_env():
+    global host_ip, cidr, result, cmd, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    detect_interface()
+
+    get_network_info()
     env_vars = {
-        "DEFAULTIP": default_ip,
-        "SUBNET": subnet_mask,
-        "CIDAR": lastcidr,
+        "DEFAULTIP": host_ip,
+        "SUBNET": subnet,
+        "CIDR": cidr,
         "GATEWAY": gateway,
         "BROADCAST": broadcast_address,
-        "SCANNER": scanner_ip,
         "PWD": pwd,
         "USER": user,
         "SYSTEM": sys,
         "INTERFACE": interface,
-        "COPYFILEPATH": copyfilepath,
-        "CHOOSENIP": chosen_ip,
-        "LASTIP": lastip,
-        "LASTCIDR": lastcidr,
+        "PORT": port,
+        "OUTDIR": out_dir,
+        "SRCDIR": src_dir,
+        "CERTI": certi,
+        "KEY": key,
+        "DEST_HOST": dest_host
+
     }
 
     env_file = ".env"
@@ -226,5 +217,4 @@ def update_env():
 
 
 if __name__ == "__main__":
-    update_env()
-    os.system("python " + os.path.join(pwd, "set_static_ip.py"))
+    write_env()

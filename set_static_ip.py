@@ -9,7 +9,7 @@ from scanner import *
 from startsetup import *
 
 
-default_ip = ""
+host_ip = ""
 cidr = ""
 gateway = ""
 scanner_ip = ""
@@ -26,10 +26,10 @@ lastip = ''
 lastcidr = ''
 
 def load_env():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet, lastip, lastcidr
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet, lastip, lastcidr
     load_dotenv()
-    default_ip = os.getenv("DEFAULTIP", "172.18.0.2")
-    cidr = os.getenv("CIDAR", "16")
+    host_ip = os.getenv("DEFAULTIP", "172.18.0.2")
+    cidr = os.getenv("CIDR", "16")
     gateway = os.getenv("GATEWAY", "172.18.0.1")
     subnet_mask = os.getenv("SUBNET")
     broadcast = os.getenv("BROADCAST")
@@ -44,7 +44,7 @@ def load_env():
     lastcidr = os.getenv("LASTCIDR", "")
 
 def scan_network():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet, lastip, lastcidr
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet, lastip, lastcidr
     
     print(f"[*] Using subnet from .env: {subnet}")
     if system_name == "linux":        
@@ -94,7 +94,7 @@ def scan_network():
 
 
 def find_unused_ip(subnet, used_ips, start=10, end=250):
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast
     net = ipaddress.ip_network(subnet, strict=False)
     base = str(list(net.hosts())[0]).rsplit(".", 1)[0]
     for i in range(start, end):
@@ -140,7 +140,7 @@ def configure_windows(adapter, ip, netmask, gateway):
 elevate(graphical=False, show_console=False)
 load_env()
 print("[*] Loaded configuration from .env:")
-print(f"    DEFAULTIP = {default_ip}")
+print(f"    DEFAULTIP = {host_ip}")
 print(f"    SUBNET    = {subnet}")
 print(f"    MASK      = {subnet_mask}")
 print(f"    GATEWAY   = {gateway}")

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import re
 from elevate import elevate
 
-default_ip = ""
+host_ip = ""
 cidr = ""
 gateway = ""
 scanner_ip = ""
@@ -18,10 +18,10 @@ file_path = ""
 CHOOSENIP = ""
 
 def load_env():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, CHOOSENIP
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, CHOOSENIP
     load_dotenv()
-    default_ip = os.getenv("DEFAULTIP", "172.18.0.2")
-    cidr = os.getenv("CIDAR", "16")
+    host_ip = os.getenv("DEFAULTIP", "172.18.0.2")
+    cidr = os.getenv("CIDR", "16")
     gateway = os.getenv("GATEWAY", "172.18.0.1")
     scanner_ip = os.getenv("SCANNER", "172.18.0.200")
     interface = os.getenv("INTERFACE", None)
@@ -34,7 +34,7 @@ def load_env():
     # set_key(os.path.join(pwd, ".env"), "CHOOSENIP", scanner_ip)
 
 def checkfile():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
     if os.path.exists(file_path):
         pass
     else:
@@ -49,7 +49,7 @@ def gethostlist():
     # else:
     #     print(CHOOSENIP, "in else")
     #     # elevate()
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
     file_path = os.path.join(os.getcwd(), "ipsn.txt")
     if system_name.startswith("lin"):
         return scanfromlinux()
@@ -57,7 +57,7 @@ def gethostlist():
         return scanfromwin()
 
 def scanfromlinux():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
     checkfile()
     # print("inside the scanner", os.getcwd())
     subnet = f"{gateway}/{cidr}"
@@ -83,7 +83,7 @@ def ping_silent(ip):
 
 
 def scanfromwin():
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
     checkfile()
 
     threads = []
@@ -112,7 +112,7 @@ def scanfromwin():
     return unique_ips
 
 def append_host(lis):
-    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
     checkfile()
     fh = open(file_path, "r")
     data = fh.readlines()
