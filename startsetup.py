@@ -108,7 +108,7 @@ def get_network_info():
     broadcast = socket.inet_ntoa(struct.pack("!I", broadcast_int))
     
     return {
-        "DEFAULTIP": host_ip,
+        "HOST": host_ip,
         "SUBNET": subnet,
         "CIDR": cidr,
         "GATEWAY": gateway,
@@ -128,7 +128,7 @@ def load_env_vars():
     user = os.getenv("USER", getpass.getuser())
     sys = os.getenv("SYSTEM", platform.system().lower())
     interface = os.getenv("INTERFACE", interface)
-    host_ip = os.getenv("DEFAULTIP", "")
+    host_ip = os.getenv("HOST", "")
     subnet = os.getenv("SUBNET", "")
     gateway = os.getenv("GATEWAY", "")
     broadcast_address = os.getenv("BROADCAST", "")
@@ -141,6 +141,23 @@ def load_env_vars():
     dest_host = os.getenv("DEST_HOST", "")
     
     print(f"[+] Loaded environment variables from .env")
+    # print({
+    #     "host": host_ip,
+    #     "port": port,
+    #     "certi": certi,
+    #     "key": key,
+    #     "out_dir": out_dir,
+    #     "src": src_dir,
+    #     "interface": interface,
+    #     "system": sys,
+    #     "pwd": pwd,
+    #     "user": user,
+    #     "subnet": subnet,
+    #     "gateway": gateway,
+    #     "broadcast": broadcast_address,
+    #     "cidr": cidr,
+    #     "dest_host": dest_host
+    # })
     return {
         "host": host_ip,
         "port": port,
@@ -174,7 +191,7 @@ def write_env():
         os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
     get_network_info()
     env_vars = {
-        "DEFAULTIP": host_ip,
+        "HOST": host_ip,
         "SUBNET": subnet,
         "CIDR": cidr,
         "GATEWAY": gateway,

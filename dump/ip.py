@@ -49,7 +49,7 @@ def get_network_info():
     broadcast = socket.inet_ntoa(struct.pack("!I", broadcast_int))
     
     return {
-        "DEFAULTIP": host_ip,
+        "HOST": host_ip,
         "SUBNET": subnet,
         "CIDR": cidr,
         "GATEWAY": gateway,

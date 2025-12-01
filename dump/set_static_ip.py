@@ -28,7 +28,7 @@ lastcidr = ''
 def load_env():
     global host_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet, lastip, lastcidr
     load_dotenv()
-    host_ip = os.getenv("DEFAULTIP", "172.18.0.2")
+    host_ip = os.getenv("HOST", "172.18.0.2")
     cidr = os.getenv("CIDR", "16")
     gateway = os.getenv("GATEWAY", "172.18.0.1")
     subnet_mask = os.getenv("SUBNET")
@@ -140,7 +140,7 @@ def configure_windows(adapter, ip, netmask, gateway):
 elevate(graphical=False, show_console=False)
 load_env()
 print("[*] Loaded configuration from .env:")
-print(f"    DEFAULTIP = {host_ip}")
+print(f"    HOST = {host_ip}")
 print(f"    SUBNET    = {subnet}")
 print(f"    MASK      = {subnet_mask}")
 print(f"    GATEWAY   = {gateway}")

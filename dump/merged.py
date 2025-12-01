@@ -99,9 +99,9 @@ def load_latest_host():
 
 def check_subnet(ip: str) -> bool:
     # Load the default IP from environment variable
-    host_ip = os.getenv("DEFAULTIP")
+    host_ip = os.getenv("HOST")
     if not host_ip:
-        raise ValueError("DEFAULTIP environment variable not set")
+        raise ValueError("HOST environment variable not set")
 
     ip_parts = ip.strip().split('.')
     default_parts = host_ip.strip().split('.')

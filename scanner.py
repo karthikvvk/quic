@@ -27,7 +27,7 @@ def load_env():
     load_dotenv()
     
     # Load from .env with appropriate defaults
-    host_ip = os.getenv("DEFAULTIP", "")
+    host_ip = os.getenv("HOST", "")
     cidr = os.getenv("CIDR", "24")
     gateway = os.getenv("GATEWAY", "")
     subnet = os.getenv("SUBNET", "255.255.255.0")

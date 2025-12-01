@@ -5,13 +5,17 @@ import os
 import json
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
+import requests
 from startsetup import *
+from scanner import *
+from flask_cors import CORS
+
 
 app = Flask(__name__)
 
 CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
-
+CORS(app) 
 
 async def send_command(host, port, cert_verify, command, src=None, dest=None):
     config = QuicConfiguration(is_client=True, verify_mode=0)
@@ -55,6 +59,48 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
             client.transmit()
 
         await asyncio.sleep(0.5)
+
+
+
+def check_subnet(ip):
+    # Load the default IP from environment variable
+    env = load_env_vars()
+    host_ip= (
+        env["host"]
+    )
+    if not host_ip:
+        raise ValueError("HOST environment variable not set")
+
+    # Split both IPs into parts
+    ip_parts = ip.strip().split('.')
+    default_parts = host_ip.strip().split('.')
+    ed = ip_parts[-1]
+    print(ed, "this is ed")
+    if ed == '1' or ed == "200" or ed == "255":
+        return False
+    # Compare all but the last segment
+    return ip_parts[:-1] == default_parts[:-1]
+
+
+
+
+def get_OS_TYPE(REMOTE_HOST=""):
+    if not True:
+        return "windows" if platform.system().lower().startswith("win") else "linux"
+    try:
+        response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", json={"request": "osinfo"}, timeout=5)
+        print("Response from remote host:", response.status_code, response.text)
+        if response.status_code == 200:
+            data = response.json()
+            return {"os": data.get("os", "linux"), "user": data.get("user")}
+        else:
+            return {"os": "linux", "user": None}
+    except:
+        print(f"Error contacting remote host")
+        return {"os": "linux", "user": None}
+
+
+
 
 
 @app.route('/copy', methods=['POST'])
@@ -204,6 +250,39 @@ def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy"}), 200
 
+@app.route("/lsithost", methods=["GET"])
+def listhost():
+    env = load_env_vars()
+    host, port, certi = (
+        env["host"],
+        env["user"],
+        env["certi"]
+    )
+    host_list = gethostlist()
+    # load_dotenv()
+    # CHOOSENIP = host
+
+    result = []
+    print(host_list)
+    for ip in host_list:
+        subck = check_subnet(ip)
+        print(subck)
+        if subck:
+            res = get_OS_TYPE(ip)
+            username = res.get("user")
+            result.append({"host": ip, "user": username})
+
+    return jsonify(result)
+
+@app.route("/osinfo", methods=["POST"])
+def osinfo():
+    try:
+        os_name = platform.system().lower()
+        user_name = getpass.getuser()
+        print(f"OS Info Requested: OS={os_name}, User={user_name}")
+        return jsonify({"os": os_name, "user": user_name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/listdir', methods=['POST'])
