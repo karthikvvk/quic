@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
-CORS(app) 
+CORS(app, resources={r"/*": {"origins":"*"}})
 
 async def send_command(host, port, cert_verify, command, src=None, dest=None):
     config = QuicConfiguration(is_client=True, verify_mode=0)
