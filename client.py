@@ -75,7 +75,7 @@ def check_subnet(ip):
     ip_parts = ip.strip().split('.')
     default_parts = host_ip.strip().split('.')
     ed = ip_parts[-1]
-    print(ed, "this is ed")
+    # print(ed, "this is ed")
     if ed == '1' or ed == "200" or ed == "255":
         return False
     # Compare all but the last segment
@@ -285,6 +285,10 @@ def osinfo():
         return jsonify({"error": str(e)}), 500
 
 
+
+
+
+
 @app.route('/listdir', methods=['POST'])
 def list_directory():
     """
@@ -295,8 +299,8 @@ def list_directory():
       - error:     {"status":"error","message":"..."}
     """
     try:
-        data = request.get_json() or {}
-        path = data.get("cdir")
+        data = request.get_json()
+        path = data.get("path")
         if not path:
             return jsonify({"status": "error", "message": "cdir is required"}), 400
 

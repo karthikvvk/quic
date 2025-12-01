@@ -4,3 +4,4 @@ flask
 dotenv
 ipaddress
 aioquic
+flask_cors

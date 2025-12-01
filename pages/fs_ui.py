@@ -81,7 +81,7 @@ def render_tree(base_url, path_state_key, key_prefix, selected_key):
                     st.rerun()
             return
 
-        resp, err = call_api("listdir", {"cdir": current_path}, base_url)
+        resp, err = call_api("listdir", {"path": current_path}, base_url)
         if err:
             st.error(f"Listing failed: {err}  \n(API: {base_url}, path: {current_path})")
             return
@@ -95,7 +95,7 @@ def render_tree(base_url, path_state_key, key_prefix, selected_key):
 
         for item in sorted(items):
             full_path = os.path.join(current_path, item)
-            probe, probe_err = call_api("listdir", {"cdir": full_path}, base_url)
+            probe, probe_err = call_api("listdir", {"path": full_path}, base_url)
             if not probe_err and isinstance(probe.get("files"), list):
                 btn_key = f"{key_prefix}_folder_{full_path}"
                 if st.button(f"📁 {item}", key=btn_key, use_container_width=True):
