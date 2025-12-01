@@ -5,12 +5,10 @@ import os
 from pathlib import Path
 from startsetup import load_env_vars
 from dotenv import load_dotenv
-import json
 
 st.set_page_config(page_title="QUIC File Transfer", page_icon="📁", layout="wide")
 load_dotenv()
 
-# ---------- Helpers ----------
 st.markdown("""
 <style>
     .stButton button { width: 100%; }
@@ -19,7 +17,7 @@ st.markdown("""
 
 
 def load_config():
-    """Load environment/config via startsetup.load_env_vars(). Safe: returns dict."""
+    """Load environment/config via startsetup.load_env_vars()"""
     try:
         env = load_env_vars()
         if not isinstance(env, dict):
@@ -30,6 +28,7 @@ def load_config():
 
 
 def call_api(endpoint, data, base_url):
+    """Make API call to peer"""
     if not base_url:
         return None, f"Base URL not configured for endpoint {endpoint}"
     url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -39,12 +38,13 @@ def call_api(endpoint, data, base_url):
         try:
             return resp.json(), None
         except ValueError:
-            return None, f"Invalid JSON response from {url} (status {resp.status_code})"
+            return None, f"Invalid JSON response from {url}"
     except requests.exceptions.RequestException as e:
         return None, str(e)
 
 
 def format_size(size):
+    """Format file size"""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size < 1024.0:
             return f"{size:.1f} {unit}"
@@ -53,118 +53,113 @@ def format_size(size):
 
 
 def render_tree(base_url, path_state_key, key_prefix, selected_key):
+    """Render file tree for a peer"""
     try:
-        current_path = st.session_state.get(path_state_key, "")
+        current_path = st.session_state.get(path_state_key, "/")
         if not current_path:
-            st.info("No path set")
-            return
+            current_path = "/"
+            st.session_state[path_state_key] = current_path
 
+        # Parent navigation
         parent = os.path.dirname(current_path.rstrip("/"))
         cols = st.columns([1, 9])
         with cols[0]:
-            if parent and st.button(".. (up)", key=f"{key_prefix}_up_{current_path}"):
+            if parent and st.button("⬆️", key=f"{key_prefix}_up_{current_path}", help="Go up"):
                 st.session_state[path_state_key] = parent or "/"
                 st.rerun()
         with cols[1]:
-            st.markdown(f"**{current_path}**")
+            st.markdown(f"**`{current_path}`**")
 
         if not base_url:
-            st.warning("API endpoint for this panel is not configured.")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Use loopback defaults for this panel", key=f"{key_prefix}_use_localhost"):
-                    st.session_state[f"{key_prefix}_override_api"] = "http://127.0.0.1:5000"
-                    st.rerun()
-            with col2:
-                if st.button("Retry loading config", key=f"{key_prefix}_retry_config"):
-                    st.session_state._config = load_config()
-                    st.rerun()
+            st.warning("API endpoint not configured")
             return
 
+        # List directory
         resp, err = call_api("listdir", {"path": current_path}, base_url)
         if err:
-            st.error(f"Listing failed: {err}  \n(API: {base_url}, path: {current_path})")
+            st.error(f"Failed to list directory: {err}")
             return
+        
         items = resp.get("files", []) if isinstance(resp, dict) else []
         if not items:
-            st.info("Empty directory")
+            st.info("📂 Empty directory")
             return
 
         if selected_key not in st.session_state:
             st.session_state[selected_key] = []
 
+        # Render items
         for item in sorted(items):
             full_path = os.path.join(current_path, item)
+            
+            # Check if it's a directory
             probe, probe_err = call_api("listdir", {"path": full_path}, base_url)
-            if not probe_err and isinstance(probe.get("files"), list):
+            is_directory = (not probe_err and isinstance(probe, dict) and 
+                          probe.get("type") == "directory")
+
+            if is_directory:
                 btn_key = f"{key_prefix}_folder_{full_path}"
                 if st.button(f"📁 {item}", key=btn_key, use_container_width=True):
                     st.session_state[path_state_key] = full_path
                     st.rerun()
             else:
                 cb_key = f"{key_prefix}_file_{full_path}"
-                checked = st.checkbox(f"📄 {item}", key=cb_key,
-                                      value=(full_path in st.session_state[selected_key]))
+                checked = st.checkbox(
+                    f"📄 {item}", 
+                    key=cb_key,
+                    value=(full_path in st.session_state[selected_key])
+                )
                 if checked and full_path not in st.session_state[selected_key]:
                     st.session_state[selected_key].append(full_path)
                 if (not checked) and (full_path in st.session_state[selected_key]):
                     st.session_state[selected_key].remove(full_path)
+                    
     except Exception as e:
         st.error(f"Error rendering tree: {e}")
 
 
-# ---------- Session state init ----------
+# ---------- Session State Init ----------
 if "local_path" not in st.session_state:
     st.session_state.local_path = str(Path.home())
+
 if "remote_path" not in st.session_state:
-    st.session_state.remote_path = ""
+    st.session_state.remote_path = "/"
+
 if "selected_local_files" not in st.session_state:
     st.session_state.selected_local_files = []
+
 if "selected_remote_files" not in st.session_state:
     st.session_state.selected_remote_files = []
+
 if "_config" not in st.session_state:
     st.session_state._config = load_config()
 
-# ---------- Allow navigation from selector ----------
-# If selector set an immediate override, use it
-if st.session_state.get("remote_override_api"):
-    # keep as-is
-    pass
-
-# If goto flag present from fallback navigation, apply override and clear flag
+# Handle navigation from host selector
 if st.session_state.get("goto_page") == "file_manager":
     remote = st.session_state.get("REMOTE_HOST") or os.environ.get("DEST_HOST")
     if remote:
         st.session_state["remote_override_api"] = f"http://{remote}:5000"
-        if not st.session_state.get("remote_path"):
-            # prefer OUTDIR from .env if present
-            env_out = os.environ.get("OUTDIR") or os.environ.get("SRCDIR") or ""
-            if env_out:
-                st.session_state["remote_path"] = env_out
     st.session_state.pop("goto_page", None)
 
-# ---------- Load config & endpoints ----------
+# ---------- Load Config ----------
 config = st.session_state._config or {}
 host_ip = config.get("host") or config.get("host_ip") or ""
-dest_host = config.get("dest_host") or config.get("dest") or os.environ.get("DEST_HOST") or ""
-out_dir = config.get("out_dir") or config.get("out") or os.environ.get("OUTDIR") or ""
+dest_host = (config.get("dest_host") or config.get("dest") or 
+             os.environ.get("DEST_HOST") or "")
 
-# Panel overrides from session_state
-LOCAL_API = st.session_state.get("local_override_api") or (f"http://{host_ip}:5000" if host_ip else "")
-REMOTE_API = st.session_state.get("remote_override_api") or (f"http://{dest_host}:5000" if dest_host else "")
-
-# ensure remote_path init from env/out_dir
-if not st.session_state.remote_path and out_dir:
-    st.session_state.remote_path = out_dir
+# API endpoints
+LOCAL_API = (st.session_state.get("local_override_api") or 
+             (f"http://{host_ip}:5000" if host_ip else ""))
+REMOTE_API = (st.session_state.get("remote_override_api") or 
+              (f"http://{dest_host}:5000" if dest_host else ""))
 
 # ---------- UI ----------
-st.title("📁 QUIC File Transfer Manager")
+st.title("📁 Bidirectional QUIC File Transfer")
 
-# Top navigation: change host button
+# Navigation bar
 nav_col1, nav_col2 = st.columns([1, 9])
 with nav_col1:
     if st.button("⬅️ Change Host"):
-        # clear immediate overrides and go back to selector
         for k in ("REMOTE_HOST", "REMOTE_USER", "REMOTE_PASS", "remote_override_api"):
             st.session_state.pop(k, None)
         try:
@@ -173,92 +168,146 @@ with nav_col1:
             st.session_state["goto_page"] = "host_selector"
             st.rerun()
 with nav_col2:
-    st.markdown("**Remote Host:** " + (os.environ.get("DEST_HOST") or dest_host or "Not set"))
+    st.markdown(f"**Local:** `{host_ip or 'localhost'}` ⟷ **Remote:** `{dest_host or 'Not set'}`")
 
-if not config:
-    st.warning("Configuration not found. Use the buttons below to continue.")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("Retry load .env/config", key="retry_load_config"):
-            st.session_state._config = load_config()
-            st.rerun()
-    with c2:
-        if st.button("Use loopback defaults (127.0.0.1)", key="use_loopback_defaults"):
-            st.session_state["local_override_api"] = "http://127.0.0.1:5000"
-            st.session_state["remote_override_api"] = "http://127.0.0.1:5000"
-            st.session_state.remote_path = "/tmp"
-            st.rerun()
-    with c3:
-        if st.button("Set demo (no APIs)", key="demo_no_api"):
-            st.session_state["local_override_api"] = ""
-            st.session_state["remote_override_api"] = ""
-            st.session_state.remote_path = ""
-            st.rerun()
+# Debug info
+with st.expander("🔧 Debug Info"):
+    st.json({
+        "local_api": LOCAL_API,
+        "remote_api": REMOTE_API,
+        "local_path": st.session_state.get("local_path"),
+        "remote_path": st.session_state.get("remote_path"),
+        "selected_local": len(st.session_state.get("selected_local_files", [])),
+        "selected_remote": len(st.session_state.get("selected_remote_files", []))
+    })
 
-# Debug expander
-with st.expander("Debug: config / endpoints"):
-    st.json(config)
-    st.write("LOCAL_API:", LOCAL_API)
-    st.write("REMOTE_API:", REMOTE_API)
-    st.write("session remote_path:", st.session_state.get("remote_path"))
-
+# Main layout
 col_local, col_actions, col_remote = st.columns([5, 2, 5])
 
 with col_local:
     st.subheader("💻 Local Files")
-    panel_local_api = st.session_state.get("local_override_api") or LOCAL_API
-    render_tree(panel_local_api, "local_path", "local", "selected_local_files")
+    st.caption(f"API: {LOCAL_API or 'Not configured'}")
+    render_tree(LOCAL_API, "local_path", "local", "selected_local_files")
+    
+    if st.session_state.selected_local_files:
+        st.info(f"✅ {len(st.session_state.selected_local_files)} file(s) selected")
 
 with col_actions:
     st.subheader("⚡ Actions")
-    st.markdown("**Remote Destination:**")
-    st.code(st.session_state.get("remote_path", "Not set"), language=None)
-
-    panel_local_api = st.session_state.get("local_override_api") or LOCAL_API
-    if st.button("📋 Copy →", use_container_width=True, key="action_copy"):
-        remote_dest = st.session_state.get("remote_path")
+    
+    # Copy Local → Remote
+    st.markdown("**Copy/Move TO Remote:**")
+    st.code(st.session_state.get("remote_path", "/"), language=None)
+    
+    if st.button("📋 Copy →", use_container_width=True, key="copy_to_remote"):
+        remote_dest = st.session_state.get("remote_path", "/")
         if not remote_dest:
-            st.error("Remote destination is empty. Navigate to a folder in Remote Files.")
+            st.error("Remote path not set")
+        elif not st.session_state.selected_local_files:
+            st.warning("No local files selected")
         else:
-            for full in list(st.session_state.selected_local_files):
-                filename = os.path.basename(full)
-                data = {"src": full, "dest": remote_dest, "filename": filename}
-                result, error = call_api("copy", data, panel_local_api)
+            for src_path in list(st.session_state.selected_local_files):
+                data = {"src": src_path, "dest": remote_dest}
+                result, error = call_api("copy", data, LOCAL_API)
                 if error:
-                    st.error(f"{filename}: {error}")
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
                 else:
-                    st.success(f"Copied {filename}")
-
-    if st.button("🔄 Move →", use_container_width=True, key="action_move"):
-        remote_dest = st.session_state.get("remote_path")
-        if not remote_dest:
-            st.error("Remote destination is empty. Navigate to a folder in Remote Files.")
-        else:
-            for full in list(st.session_state.selected_local_files):
-                filename = os.path.basename(full)
-                data = {"src": full, "dest": remote_dest, "filename": filename}
-                result, error = call_api("move", data, panel_local_api)
-                if error:
-                    st.error(f"{filename}: {error}")
-                else:
-                    st.success(f"Moved {filename}")
+                    st.success(f"✅ Copied {os.path.basename(src_path)}")
             st.session_state.selected_local_files = []
+            st.rerun()
 
-    if st.button("🗑️ Delete Selected Local", use_container_width=True, key="action_delete_local"):
-        for full in list(st.session_state.selected_local_files):
-            filename = os.path.basename(full)
-            data = {"src": full}
-            result, error = call_api("delete", data, panel_local_api)
-            if error:
-                st.error(f"{filename}: {error}")
-            else:
-                st.success(f"Deleted {filename}")
-        st.session_state.selected_local_files = []
+    if st.button("🔄 Move →", use_container_width=True, key="move_to_remote"):
+        remote_dest = st.session_state.get("remote_path", "/")
+        if not remote_dest:
+            st.error("Remote path not set")
+        elif not st.session_state.selected_local_files:
+            st.warning("No local files selected")
+        else:
+            for src_path in list(st.session_state.selected_local_files):
+                data = {"src": src_path, "dest": remote_dest}
+                result, error = call_api("move", data, LOCAL_API)
+                if error:
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                else:
+                    st.success(f"✅ Moved {os.path.basename(src_path)}")
+            st.session_state.selected_local_files = []
+            st.rerun()
+
+    st.divider()
+
+    # Copy Remote → Local
+    st.markdown("**Copy/Move FROM Remote:**")
+    st.code(st.session_state.get("local_path", str(Path.home())), language=None)
+    
+    if st.button("← 📋 Copy", use_container_width=True, key="copy_from_remote"):
+        local_dest = st.session_state.get("local_path", str(Path.home()))
+        if not local_dest:
+            st.error("Local path not set")
+        elif not st.session_state.selected_remote_files:
+            st.warning("No remote files selected")
+        else:
+            for src_path in list(st.session_state.selected_remote_files):
+                data = {"src": src_path, "dest": local_dest}
+                result, error = call_api("copy", data, REMOTE_API)
+                if error:
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                else:
+                    st.success(f"✅ Copied {os.path.basename(src_path)}")
+            st.session_state.selected_remote_files = []
+            st.rerun()
+
+    if st.button("← 🔄 Move", use_container_width=True, key="move_from_remote"):
+        local_dest = st.session_state.get("local_path", str(Path.home()))
+        if not local_dest:
+            st.error("Local path not set")
+        elif not st.session_state.selected_remote_files:
+            st.warning("No remote files selected")
+        else:
+            for src_path in list(st.session_state.selected_remote_files):
+                data = {"src": src_path, "dest": local_dest}
+                result, error = call_api("move", data, REMOTE_API)
+                if error:
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                else:
+                    st.success(f"✅ Moved {os.path.basename(src_path)}")
+            st.session_state.selected_remote_files = []
+            st.rerun()
+
+    st.divider()
+
+    # Delete operations
+    if st.button("🗑️ Delete Local", use_container_width=True, key="delete_local"):
+        if not st.session_state.selected_local_files:
+            st.warning("No local files selected")
+        else:
+            for src_path in list(st.session_state.selected_local_files):
+                data = {"src": src_path}
+                result, error = call_api("delete_local", data, LOCAL_API)
+                if error:
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                else:
+                    st.success(f"✅ Deleted {os.path.basename(src_path)}")
+            st.session_state.selected_local_files = []
+            st.rerun()
+
+    if st.button("🗑️ Delete Remote", use_container_width=True, key="delete_remote"):
+        if not st.session_state.selected_remote_files:
+            st.warning("No remote files selected")
+        else:
+            for src_path in list(st.session_state.selected_remote_files):
+                data = {"src": src_path}
+                result, error = call_api("delete", data, REMOTE_API)
+                if error:
+                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                else:
+                    st.success(f"✅ Deleted {os.path.basename(src_path)}")
+            st.session_state.selected_remote_files = []
+            st.rerun()
 
 with col_remote:
     st.subheader("☁️ Remote Files")
-    st.markdown(f"*API:* `{REMOTE_API or 'not configured'}`")
-    panel_remote_api = st.session_state.get("remote_override_api") or REMOTE_API
-    render_tree(panel_remote_api, "remote_path", "remote", "selected_remote_files")
-
-# end
+    st.caption(f"API: {REMOTE_API or 'Not configured'}")
+    render_tree(REMOTE_API, "remote_path", "remote", "selected_remote_files")
+    
+    if st.session_state.selected_remote_files:
+        st.info(f"✅ {len(st.session_state.selected_remote_files)} file(s) selected")
