@@ -212,4 +212,4 @@ def append_host(lis):
         print(f"[!] Error updating host list: {e}")
 
 
-print(gethostlist())
+# print(gethostlist())
