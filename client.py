@@ -9,6 +9,8 @@ import requests
 from startsetup import *
 from scanner import *
 from flask_cors import CORS
+import platform
+import getpass
 
 
 app = Flask(__name__)
@@ -18,41 +20,58 @@ ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
 
-async def transfer_file(host, port, cert_verify, src, dest):
+async def send_quic_command(host, port, cert_verify, command, src="", dest="", filedata=b""):
     """
-    Transfer file to remote peer via QUIC
-    - src: absolute path of source file
-    - dest: absolute path where file should be written on remote
+    Send a command to remote QUIC server
+    - command: "copy", "move", "create", "delete"
+    - src: source path (for delete/create operations)
+    - dest: destination path (for copy/move operations)
+    - filedata: file contents (for copy/move operations)
     """
     config = QuicConfiguration(is_client=True, verify_mode=0)
     if cert_verify:
         config.load_verify_locations(cert_verify)
 
-    async with connect(host, port, configuration=config) as client:
-        stream_id = client._quic.get_next_available_stream_id(is_unidirectional=False)
-        print(f"[+] Transferring: {src} -> {dest}")
-
-        # Send header with destination path
-        header = json.dumps({"dest": dest}).encode()
-        client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
-        client.transmit()
-
-        # Send file data
-        if not os.path.exists(src):
-            print(f"[!] Source file not found: {src}")
-            return
+    try:
+        async with connect(host, port, configuration=config) as client:
+            stream_id = client._quic.get_next_available_stream_id(is_unidirectional=False)
             
-        with open(src, "rb") as f:
-            while True:
-                chunk = f.read(CHUNK_SIZE)
-                if not chunk:
-                    client._quic.send_stream_data(stream_id, b"", end_stream=True)
+            # Prepare header
+            header = json.dumps({
+                "command": command,
+                "src": src,
+                "dest": dest
+            }).encode()
+            
+            print(f"[QUIC] Sending command: {command}, src: {src}, dest: {dest}")
+            
+            # Send header + delimiter
+            client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
+            client.transmit()
+            
+            # Send file data if present
+            if filedata:
+                print(f"[QUIC] Sending {len(filedata)} bytes")
+                offset = 0
+                while offset < len(filedata):
+                    chunk = filedata[offset:offset + CHUNK_SIZE]
+                    is_last = (offset + len(chunk)) >= len(filedata)
+                    client._quic.send_stream_data(stream_id, chunk, end_stream=is_last)
                     client.transmit()
-                    break
-                client._quic.send_stream_data(stream_id, chunk, end_stream=False)
+                    offset += len(chunk)
+                    await asyncio.sleep(0.01)  # Small delay between chunks
+            else:
+                # No file data, close stream
+                client._quic.send_stream_data(stream_id, b"", end_stream=True)
                 client.transmit()
-
-        await asyncio.sleep(0.5)
+            
+            # Wait for transmission to complete
+            await asyncio.sleep(0.5)
+            print(f"[QUIC] Command sent successfully")
+            
+    except Exception as e:
+        print(f"[QUIC] Error: {e}")
+        raise
 
 
 def check_subnet(ip):
@@ -72,26 +91,22 @@ def check_subnet(ip):
 
 
 def get_OS_TYPE(REMOTE_HOST=""):
-    if not True:
-        return "windows" if platform.system().lower().startswith("win") else "linux"
     try:
         response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", 
                                 json={"request": "osinfo"}, timeout=5)
-        print("Response from remote host:", response.status_code, response.text)
         if response.status_code == 200:
             data = response.json()
             return {"os": data.get("os", "linux"), "user": data.get("user")}
         else:
             return {"os": "linux", "user": None}
     except:
-        print(f"Error contacting remote host")
         return {"os": "linux", "user": None}
 
 
 @app.route('/transfer', methods=['POST'])
 def transfer():
     """
-    Transfer file to remote peer
+    Transfer file to remote peer via QUIC
     Body: {
         "src": "/absolute/path/to/local/file",
         "dest": "/absolute/path/on/remote/where/file/should/be/written"
@@ -99,8 +114,8 @@ def transfer():
     """
     try:
         data = request.get_json()
-        src = data.get('src')  # Absolute local file path
-        dest = data.get('dest')  # Absolute remote file path (not directory)
+        src = data.get('src')
+        dest = data.get('dest')
 
         if not src:
             return jsonify({"error": "src (source file path) is required"}), 400
@@ -111,16 +126,30 @@ def transfer():
         if not os.path.exists(src):
             return jsonify({"error": f"Source file not found: {src}"}), 404
 
+        # Read file data
+        with open(src, "rb") as f:
+            filedata = f.read()
+
         env = load_env_vars()
         dest_host = env.get("dest_host") or env.get("dest")
         port = int(env["port"])
-        certi = env["certi"]
+        certi = env.get("certi")
 
         if not dest_host:
             return jsonify({"error": "dest_host not configured"}), 500
 
         print(f"[API] Transfer: {src} -> {dest_host}:{dest}")
-        asyncio.run(transfer_file(dest_host, port, certi, src, dest))
+        
+        # Use QUIC to send file
+        asyncio.run(send_quic_command(
+            host=dest_host,
+            port=port,
+            cert_verify=certi,
+            command="copy",
+            src=os.path.basename(src),
+            dest=dest,
+            filedata=filedata
+        ))
         
         return jsonify({
             "status": "success",
@@ -128,6 +157,53 @@ def transfer():
         }), 200
 
     except Exception as e:
+        print(f"[ERROR] {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/delete_remote', methods=['POST'])
+def delete_remote_file():
+    """
+    Delete file on remote peer via QUIC
+    Body: {
+        "src": "/absolute/path/to/remote/file"
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')
+
+        if not src:
+            return jsonify({"error": "src is required"}), 400
+
+        env = load_env_vars()
+        dest_host = env.get("dest_host") or env.get("dest")
+        port = int(env["port"])
+        certi = env.get("certi")
+
+        if not dest_host:
+            return jsonify({"error": "dest_host not configured"}), 500
+
+        print(f"[API] Delete remote: {src} on {dest_host}")
+        
+        # Use QUIC to delete file
+        asyncio.run(send_quic_command(
+            host=dest_host,
+            port=port,
+            cert_verify=certi,
+            command="delete",
+            src=src,
+            dest="",
+            filedata=b""
+        ))
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Deleted {src} on {dest_host}"
+        }), 200
+
+    except Exception as e:
+        print(f"[ERROR] {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -208,10 +284,6 @@ def list_directory():
     """
     List directory contents on THIS peer
     POST body: {"path": "/absolute/path"}
-    Responses (JSON):
-      - directory: {"status":"success","type":"directory","files":["a","b",...]}
-      - file: {"status":"success","type":"file","info": {"name": "...", "size": 1234, "mtime": "..."}}
-      - error: {"status":"error","message":"..."}
     """
     try:
         data = request.get_json()

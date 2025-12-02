@@ -36,7 +36,15 @@ class FileReceiverProtocol(QuicConnectionProtocol):
 
             if event.end_stream:
                 payload = self._streams.pop(stream_id)
-                header_bytes, sep, filedata = payload.partition(b"\n")
+                
+                # Split header and file data
+                try:
+                    header_end = payload.index(b"\n")
+                    header_bytes = payload[:header_end]
+                    filedata = payload[header_end + 1:]
+                except ValueError:
+                    print(f"[!] No header delimiter found")
+                    return
 
                 try:
                     cmd = json.loads(header_bytes.decode("utf-8", errors="ignore"))
@@ -44,42 +52,29 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                     print(f"[!] Invalid header: {e}")
                     return
 
-                src = cmd.get("src", "")  # Full path or filename
-                dest = cmd.get("dest", "")  # Destination directory (absolute)
-                command = cmd.get("command")
+                src = cmd.get("src", "")
+                dest = cmd.get("dest", "")
+                command = cmd.get("command", "copy")
 
                 print(f"[DEBUG] Command: {command}, src: {src}, dest: {dest}")
 
                 try:
-                    if command == "copy":
+                    if command == "copy" or command == "move":
                         if not dest:
-                            print(f"[!] Copy requires 'dest' path")
+                            print(f"[!] {command} requires 'dest' path")
                             return
                         
-                        target_dir = _safe_path(dest)
-                        os.makedirs(target_dir, exist_ok=True)
+                        target_path = _safe_path(dest)
                         
-                        filename = os.path.basename(src)
-                        target_file = os.path.join(target_dir, filename)
+                        # Create parent directory if needed
+                        parent_dir = os.path.dirname(target_path)
+                        if parent_dir:
+                            os.makedirs(parent_dir, exist_ok=True)
                         
-                        with open(target_file, "wb") as f:
+                        # Write the file
+                        with open(target_path, "wb") as f:
                             f.write(filedata)
-                        print(f"[+] Copied {filename} to {target_file}")
-
-                    elif command == "move":
-                        if not dest:
-                            print(f"[!] Move requires 'dest' path")
-                            return
-                        
-                        target_dir = _safe_path(dest)
-                        os.makedirs(target_dir, exist_ok=True)
-                        
-                        filename = os.path.basename(src)
-                        target_file = os.path.join(target_dir, filename)
-                        
-                        with open(target_file, "wb") as f:
-                            f.write(filedata)
-                        print(f"[+] Moved {filename} to {target_file}")
+                        print(f"[+] {command.capitalize()}d to {target_path} ({len(filedata)} bytes)")
 
                     elif command == "create":
                         if not src:
@@ -87,7 +82,9 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                             return
                         
                         target_path = _safe_path(src)
-                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        parent_dir = os.path.dirname(target_path)
+                        if parent_dir:
+                            os.makedirs(parent_dir, exist_ok=True)
                         open(target_path, "w").close()
                         print(f"[+] Created {target_path}")
 
@@ -114,9 +111,14 @@ class FileReceiverProtocol(QuicConnectionProtocol):
 
 
 async def main(host, port, cert, key):
-    print(f"Starting QUIC server on {host}:{port}")
-    print(f"Certificate: {cert}")
-    print(f"Note: All commands require explicit absolute paths")
+    print(f"╔═══════════════════════════════════════════════════════╗")
+    print(f"║          QUIC File Transfer Server Starting          ║")
+    print(f"╚═══════════════════════════════════════════════════════╝")
+    print(f"  Host: {host}")
+    print(f"  Port: {port}")
+    print(f"  Certificate: {cert}")
+    print(f"  Listening for file operations...")
+    print()
     
     configuration = QuicConfiguration(is_client=False)
     configuration.load_cert_chain(cert, key)
@@ -138,11 +140,10 @@ if __name__ == "__main__":
         port = int(env["port"])
         cert = env["certi"]
         key = env["key"]
-        # base_dir no longer needed
         
         asyncio.run(main(host, port, cert, key))
     except KeyboardInterrupt:
-        print("\nServer stopped")
+        print("\n\n[!] Server stopped by user")
     except KeyError as e:
         print(f"[!] Missing required environment variable: {e}")
     except Exception as e:
