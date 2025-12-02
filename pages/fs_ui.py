@@ -213,7 +213,7 @@ with col_actions:
 
     st.divider()
 
-    # Transfer Remote → Local
+    # Transfer Remote → Local (using the new endpoint)
     st.markdown("**Transfer FROM Remote:**")
     st.code(st.session_state.get("local_path", str(Path.home())), language=None)
     
@@ -229,16 +229,15 @@ with col_actions:
                 filename = os.path.basename(src_path)
                 dest_path = os.path.join(local_dir, filename)
                 
+                # Use the new transfer_from_remote endpoint on LOCAL API
                 data = {"src": src_path, "dest": dest_path}
-                result, error = call_api("transfer", data, REMOTE_API)
+                result, error = call_api("transfer_from_remote", data, LOCAL_API)
                 if error:
                     st.error(f"❌ {filename}: {error}")
                 else:
-                    st.success(f"✅ Transferred {filename}")
+                    st.success(f"✅ Downloaded {filename}")
             st.session_state.selected_remote_files = []
             st.rerun()
-
-    # st.divider()
 
 with col_remote:
     st.subheader("☁️ Remote Files")

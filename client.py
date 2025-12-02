@@ -103,6 +103,70 @@ def get_OS_TYPE(REMOTE_HOST=""):
         return {"os": "linux", "user": None}
 
 
+@app.route('/transfer_from_remote', methods=['POST'])
+def transfer_from_remote():
+    """
+    Trigger a file transfer FROM remote peer TO this local peer.
+    This works by making an HTTP request to the remote peer's /transfer endpoint,
+    asking it to send the file back to us via QUIC.
+    
+    Body: {
+        "src": "/absolute/path/to/remote/file",
+        "dest": "/absolute/path/on/local/where/file/should/be/written"
+    }
+    """
+    try:
+        data = request.get_json()
+        src = data.get('src')  # File path on REMOTE
+        dest = data.get('dest')  # Destination path on LOCAL
+
+        if not src:
+            return jsonify({"error": "src (remote source file path) is required"}), 400
+        if not dest:
+            return jsonify({"error": "dest (local destination path) is required"}), 400
+
+        env = load_env_vars()
+        remote_host = env.get("dest_host") or env.get("dest")
+        local_host = env.get("host")
+
+        if not remote_host:
+            return jsonify({"error": "dest_host (remote host) not configured"}), 500
+        if not local_host:
+            return jsonify({"error": "host (local host) not configured"}), 500
+
+        print(f"[API] Transfer from remote: {remote_host}:{src} -> {dest}")
+        
+        # Make HTTP request to REMOTE peer's /transfer endpoint
+        # But swap the hosts: remote will send to local
+        payload = {
+            "src": src,      # Source file on remote
+            "dest": dest     # Destination on local (this machine)
+        }
+        
+        # Call the remote's /transfer endpoint
+        response = requests.post(
+            f"http://{remote_host}:5000/transfer",
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify({
+                "status": "success",
+                "message": f"Downloaded {src} from {remote_host} to {dest}"
+            }), 200
+        else:
+            error_msg = response.json().get("error", "Unknown error")
+            return jsonify({"error": f"Remote transfer failed: {error_msg}"}), response.status_code
+
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Request to remote failed: {e}")
+        return jsonify({"error": f"Could not reach remote host: {str(e)}"}), 500
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/transfer', methods=['POST'])
 def transfer():
     """
