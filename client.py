@@ -17,11 +17,12 @@ CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
-async def send_command(host, port, cert_verify, command, src=None, dest=None):
+
+async def transfer_file(host, port, cert_verify, src, dest):
     """
-    Send command to remote peer via QUIC
-    - src: absolute path of source file (for copy/move/delete/create)
-    - dest: absolute path of destination directory (for copy/move)
+    Transfer file to remote peer via QUIC
+    - src: absolute path of source file
+    - dest: absolute path where file should be written on remote
     """
     config = QuicConfiguration(is_client=True, verify_mode=0)
     if cert_verify:
@@ -29,40 +30,27 @@ async def send_command(host, port, cert_verify, command, src=None, dest=None):
 
     async with connect(host, port, configuration=config) as client:
         stream_id = client._quic.get_next_available_stream_id(is_unidirectional=False)
-        print(f"[+] Sending command: {command}, src: {src}, dest: {dest}")
+        print(f"[+] Transferring: {src} -> {dest}")
 
-        # Build header with absolute paths
-        header_dict = {"command": command}
-
-        if src:
-            header_dict["src"] = src  # Full absolute path
-
-        if dest:
-            header_dict["dest"] = dest  # Full absolute destination path
-
-        header = json.dumps(header_dict).encode()
+        # Send header with destination path
+        header = json.dumps({"dest": dest}).encode()
         client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
         client.transmit()
 
-        # Send file data for copy/move
-        if command in ["copy", "move"] and src:
-            if not os.path.exists(src):
-                print(f"[!] Source file not found: {src}")
-                return
-                
-            with open(src, "rb") as f:
-                while True:
-                    chunk = f.read(CHUNK_SIZE)
-                    if not chunk:
-                        client._quic.send_stream_data(stream_id, b"", end_stream=True)
-                        client.transmit()
-                        break
-                    client._quic.send_stream_data(stream_id, chunk, end_stream=False)
+        # Send file data
+        if not os.path.exists(src):
+            print(f"[!] Source file not found: {src}")
+            return
+            
+        with open(src, "rb") as f:
+            while True:
+                chunk = f.read(CHUNK_SIZE)
+                if not chunk:
+                    client._quic.send_stream_data(stream_id, b"", end_stream=True)
                     client.transmit()
-
-        elif command in ["create", "delete"]:
-            client._quic.send_stream_data(stream_id, b"", end_stream=True)
-            client.transmit()
+                    break
+                client._quic.send_stream_data(stream_id, chunk, end_stream=False)
+                client.transmit()
 
         await asyncio.sleep(0.5)
 
@@ -100,24 +88,24 @@ def get_OS_TYPE(REMOTE_HOST=""):
         return {"os": "linux", "user": None}
 
 
-@app.route('/copy', methods=['POST'])
-def copy_file():
+@app.route('/transfer', methods=['POST'])
+def transfer():
     """
-    Copy file TO remote peer
+    Transfer file to remote peer
     Body: {
         "src": "/absolute/path/to/local/file",
-        "dest": "/absolute/path/to/remote/directory"
+        "dest": "/absolute/path/on/remote/where/file/should/be/written"
     }
     """
     try:
         data = request.get_json()
         src = data.get('src')  # Absolute local file path
-        dest = data.get('dest')  # Absolute remote directory path
+        dest = data.get('dest')  # Absolute remote file path (not directory)
 
         if not src:
             return jsonify({"error": "src (source file path) is required"}), 400
         if not dest:
-            return jsonify({"error": "dest (destination directory path) is required"}), 400
+            return jsonify({"error": "dest (destination file path) is required"}), 400
 
         # Verify source exists locally
         if not os.path.exists(src):
@@ -131,94 +119,12 @@ def copy_file():
         if not dest_host:
             return jsonify({"error": "dest_host not configured"}), 500
 
-        print(f"[API] Copy: {src} -> {dest_host}:{dest}")
-        asyncio.run(send_command(dest_host, port, certi, "copy", src, dest))
+        print(f"[API] Transfer: {src} -> {dest_host}:{dest}")
+        asyncio.run(transfer_file(dest_host, port, certi, src, dest))
         
         return jsonify({
             "status": "success",
-            "message": f"Copied {os.path.basename(src)} to {dest_host}:{dest}"
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/move', methods=['POST'])
-def move_file():
-    """
-    Move file TO remote peer (copy then delete local)
-    Body: {
-        "src": "/absolute/path/to/local/file",
-        "dest": "/absolute/path/to/remote/directory"
-    }
-    """
-    try:
-        data = request.get_json()
-        src = data.get('src')
-        dest = data.get('dest')
-
-        if not src:
-            return jsonify({"error": "src is required"}), 400
-        if not dest:
-            return jsonify({"error": "dest is required"}), 400
-
-        if not os.path.exists(src):
-            return jsonify({"error": f"Source file not found: {src}"}), 404
-
-        env = load_env_vars()
-        dest_host = env.get("dest_host") or env.get("dest")
-        port = int(env["port"])
-        certi = env["certi"]
-
-        if not dest_host:
-            return jsonify({"error": "dest_host not configured"}), 500
-
-        print(f"[API] Move: {src} -> {dest_host}:{dest}")
-        asyncio.run(send_command(dest_host, port, certi, "move", src, dest))
-        
-        # Delete local source after successful transfer
-        if os.path.exists(src):
-            os.remove(src)
-            print(f"[+] Deleted local source: {src}")
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Moved {os.path.basename(src)} to {dest_host}:{dest}"
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/delete', methods=['POST'])
-def delete_file():
-    """
-    Delete file on REMOTE peer
-    Body: {
-        "src": "/absolute/path/to/remote/file"
-    }
-    """
-    try:
-        data = request.get_json()
-        src = data.get('src')  # Absolute path on remote
-
-        if not src:
-            return jsonify({"error": "src is required"}), 400
-
-        env = load_env_vars()
-        dest_host = env.get("dest_host") or env.get("dest")
-        port = int(env["port"])
-        certi = env["certi"]
-
-        if not dest_host:
-            return jsonify({"error": "dest_host not configured"}), 500
-
-        print(f"[API] Delete on {dest_host}: {src}")
-        asyncio.run(send_command(dest_host, port, certi, "delete", src))
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Delete command sent for {src} on {dest_host}"
+            "message": f"Transferred {os.path.basename(src)} to {dest_host}:{dest}"
         }), 200
 
     except Exception as e:
@@ -252,41 +158,6 @@ def delete_local_file():
         return jsonify({
             "status": "success",
             "message": f"Deleted {src}"
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/create', methods=['POST'])
-def create_file():
-    """
-    Create empty file on REMOTE peer
-    Body: {
-        "src": "/absolute/path/to/new/file"
-    }
-    """
-    try:
-        data = request.get_json()
-        src = data.get('src')
-
-        if not src:
-            return jsonify({"error": "src is required"}), 400
-
-        env = load_env_vars()
-        dest_host = env.get("dest_host") or env.get("dest")
-        port = int(env["port"])
-        certi = env["certi"]
-
-        if not dest_host:
-            return jsonify({"error": "dest_host not configured"}), 500
-
-        print(f"[API] Create on {dest_host}: {src}")
-        asyncio.run(send_command(dest_host, port, certi, "create", src))
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Create command sent for {src} on {dest_host}"
         }), 200
 
     except Exception as e:

@@ -43,15 +43,6 @@ def call_api(endpoint, data, base_url):
         return None, str(e)
 
 
-def format_size(size):
-    """Format file size"""
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if size < 1024.0:
-            return f"{size:.1f} {unit}"
-        size /= 1024.0
-    return f"{size:.1f} TB"
-
-
 def render_tree(base_url, path_state_key, key_prefix, selected_key):
     """Render file tree for a peer"""
     try:
@@ -154,7 +145,7 @@ REMOTE_API = (st.session_state.get("remote_override_api") or
               (f"http://{dest_host}:5000" if dest_host else ""))
 
 # ---------- UI ----------
-st.title("📁 Bidirectional QUIC File Transfer")
+st.title("📁 QUIC File Transfer")
 
 # Navigation bar
 nav_col1, nav_col2 = st.columns([1, 9])
@@ -195,114 +186,59 @@ with col_local:
 with col_actions:
     st.subheader("⚡ Actions")
     
-    # Copy Local → Remote
-    st.markdown("**Copy/Move TO Remote:**")
+    # Transfer Local → Remote
+    st.markdown("**Transfer TO Remote:**")
     st.code(st.session_state.get("remote_path", "/"), language=None)
     
-    if st.button("📋 Copy →", use_container_width=True, key="copy_to_remote"):
-        remote_dest = st.session_state.get("remote_path", "/")
-        if not remote_dest:
+    if st.button("➡️ Transfer →", use_container_width=True, key="transfer_to_remote"):
+        remote_dir = st.session_state.get("remote_path", "/")
+        if not remote_dir:
             st.error("Remote path not set")
         elif not st.session_state.selected_local_files:
             st.warning("No local files selected")
         else:
             for src_path in list(st.session_state.selected_local_files):
-                data = {"src": src_path, "dest": remote_dest}
-                result, error = call_api("copy", data, LOCAL_API)
+                # Construct destination path: remote_dir + filename
+                filename = os.path.basename(src_path)
+                dest_path = os.path.join(remote_dir, filename)
+                
+                data = {"src": src_path, "dest": dest_path}
+                result, error = call_api("transfer", data, LOCAL_API)
                 if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                    st.error(f"❌ {filename}: {error}")
                 else:
-                    st.success(f"✅ Copied {os.path.basename(src_path)}")
-            st.session_state.selected_local_files = []
-            st.rerun()
-
-    if st.button("🔄 Move →", use_container_width=True, key="move_to_remote"):
-        remote_dest = st.session_state.get("remote_path", "/")
-        if not remote_dest:
-            st.error("Remote path not set")
-        elif not st.session_state.selected_local_files:
-            st.warning("No local files selected")
-        else:
-            for src_path in list(st.session_state.selected_local_files):
-                data = {"src": src_path, "dest": remote_dest}
-                result, error = call_api("move", data, LOCAL_API)
-                if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
-                else:
-                    st.success(f"✅ Moved {os.path.basename(src_path)}")
+                    st.success(f"✅ Transferred {filename}")
             st.session_state.selected_local_files = []
             st.rerun()
 
     st.divider()
 
-    # Copy Remote → Local
-    st.markdown("**Copy/Move FROM Remote:**")
+    # Transfer Remote → Local
+    st.markdown("**Transfer FROM Remote:**")
     st.code(st.session_state.get("local_path", str(Path.home())), language=None)
     
-    if st.button("← 📋 Copy", use_container_width=True, key="copy_from_remote"):
-        local_dest = st.session_state.get("local_path", str(Path.home()))
-        if not local_dest:
+    if st.button("⬅️ ← Transfer", use_container_width=True, key="transfer_from_remote"):
+        local_dir = st.session_state.get("local_path", str(Path.home()))
+        if not local_dir:
             st.error("Local path not set")
         elif not st.session_state.selected_remote_files:
             st.warning("No remote files selected")
         else:
             for src_path in list(st.session_state.selected_remote_files):
-                data = {"src": src_path, "dest": local_dest}
-                result, error = call_api("copy", data, REMOTE_API)
+                # Construct destination path: local_dir + filename
+                filename = os.path.basename(src_path)
+                dest_path = os.path.join(local_dir, filename)
+                
+                data = {"src": src_path, "dest": dest_path}
+                result, error = call_api("transfer", data, REMOTE_API)
                 if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
+                    st.error(f"❌ {filename}: {error}")
                 else:
-                    st.success(f"✅ Copied {os.path.basename(src_path)}")
+                    st.success(f"✅ Transferred {filename}")
             st.session_state.selected_remote_files = []
             st.rerun()
 
-    if st.button("← 🔄 Move", use_container_width=True, key="move_from_remote"):
-        local_dest = st.session_state.get("local_path", str(Path.home()))
-        if not local_dest:
-            st.error("Local path not set")
-        elif not st.session_state.selected_remote_files:
-            st.warning("No remote files selected")
-        else:
-            for src_path in list(st.session_state.selected_remote_files):
-                data = {"src": src_path, "dest": local_dest}
-                result, error = call_api("move", data, REMOTE_API)
-                if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
-                else:
-                    st.success(f"✅ Moved {os.path.basename(src_path)}")
-            st.session_state.selected_remote_files = []
-            st.rerun()
-
-    st.divider()
-
-    # Delete operations
-    if st.button("🗑️ Delete Local", use_container_width=True, key="delete_local"):
-        if not st.session_state.selected_local_files:
-            st.warning("No local files selected")
-        else:
-            for src_path in list(st.session_state.selected_local_files):
-                data = {"src": src_path}
-                result, error = call_api("delete_local", data, LOCAL_API)
-                if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
-                else:
-                    st.success(f"✅ Deleted {os.path.basename(src_path)}")
-            st.session_state.selected_local_files = []
-            st.rerun()
-
-    if st.button("🗑️ Delete Remote", use_container_width=True, key="delete_remote"):
-        if not st.session_state.selected_remote_files:
-            st.warning("No remote files selected")
-        else:
-            for src_path in list(st.session_state.selected_remote_files):
-                data = {"src": src_path}
-                result, error = call_api("delete", data, REMOTE_API)
-                if error:
-                    st.error(f"❌ {os.path.basename(src_path)}: {error}")
-                else:
-                    st.success(f"✅ Deleted {os.path.basename(src_path)}")
-            st.session_state.selected_remote_files = []
-            st.rerun()
+    # st.divider()
 
 with col_remote:
     st.subheader("☁️ Remote Files")
