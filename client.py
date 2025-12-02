@@ -103,68 +103,56 @@ def get_OS_TYPE(REMOTE_HOST=""):
         return {"os": "linux", "user": None}
 
 
+
 @app.route('/transfer_from_remote', methods=['POST'])
 def transfer_from_remote():
     """
-    Trigger a file transfer FROM remote peer TO this local peer.
-    This works by making an HTTP request to the remote peer's /transfer endpoint,
-    asking it to send the file back to us via QUIC.
-    
+    Transfer file FROM remote peer TO local via QUIC
     Body: {
-        "src": "/absolute/path/to/remote/file",
-        "dest": "/absolute/path/on/local/where/file/should/be/written"
+        "src": "/absolute/path/on/remote",
+        "dest": "/absolute/path/to/local/destination"
     }
     """
     try:
         data = request.get_json()
-        src = data.get('src')  # File path on REMOTE
-        dest = data.get('dest')  # Destination path on LOCAL
+        src = data.get('src')
+        dest = data.get('dest')
 
         if not src:
-            return jsonify({"error": "src (remote source file path) is required"}), 400
+            return jsonify({"error": "src (remote source path) is required"}), 400
         if not dest:
             return jsonify({"error": "dest (local destination path) is required"}), 400
 
         env = load_env_vars()
-        remote_host = env.get("dest_host") or env.get("dest")
-        local_host = env.get("host")
+        dest_host = env.get("dest_host") or env.get("dest")
+        port = int(env["port"])
+        certi = env.get("certi")
 
-        if not remote_host:
-            return jsonify({"error": "dest_host (remote host) not configured"}), 500
-        if not local_host:
-            return jsonify({"error": "host (local host) not configured"}), 500
+        if not dest_host:
+            return jsonify({"error": "dest_host not configured"}), 500
 
-        print(f"[API] Transfer from remote: {remote_host}:{src} -> {dest}")
+        print(f"[API] Transfer from remote: {dest_host}:{src} -> {dest}")
         
-        # Make HTTP request to REMOTE peer's /transfer endpoint
-        # But swap the hosts: remote will send to local
-        payload = {
-            "src": src,      # Source file on remote
-            "dest": dest     # Destination on local (this machine)
-        }
+        # Use QUIC to request file from remote (you'll need to implement "fetch" command)
+        asyncio.run(send_quic_command(
+            host=dest_host,
+            port=port,
+            cert_verify=certi,
+            command="fetch",  # New command to GET file from remote
+            src=src,
+            dest=dest,
+            filedata=b""
+        ))
         
-        # Call the remote's /transfer endpoint
-        response = requests.post(
-            f"http://{remote_host}:5000/transfer",
-            json=payload,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            return jsonify({
-                "status": "success",
-                "message": f"Downloaded {src} from {remote_host} to {dest}"
-            }), 200
-        else:
-            error_msg = response.json().get("error", "Unknown error")
-            return jsonify({"error": f"Remote transfer failed: {error_msg}"}), response.status_code
+        return jsonify({
+            "status": "success",
+            "message": f"Downloaded {os.path.basename(src)} from {dest_host} to {dest}"
+        }), 200
 
-    except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Request to remote failed: {e}")
-        return jsonify({"error": f"Could not reach remote host: {str(e)}"}), 500
     except Exception as e:
         print(f"[ERROR] {e}")
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.route('/transfer', methods=['POST'])
@@ -178,6 +166,11 @@ def transfer():
     """
     try:
         data = request.get_json()
+        
+        # Add validation
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
         src = data.get('src')
         dest = data.get('dest')
 
@@ -189,41 +182,70 @@ def transfer():
         # Verify source exists locally
         if not os.path.exists(src):
             return jsonify({"error": f"Source file not found: {src}"}), 404
+        
+        # Check if it's actually a file, not a directory
+        if not os.path.isfile(src):
+            return jsonify({"error": f"Source is not a file: {src}"}), 400
 
         # Read file data
-        with open(src, "rb") as f:
-            filedata = f.read()
+        try:
+            with open(src, "rb") as f:
+                filedata = f.read()
+        except PermissionError:
+            return jsonify({"error": f"Permission denied reading: {src}"}), 403
+        except Exception as e:
+            return jsonify({"error": f"Failed to read file: {str(e)}"}), 500
 
-        env = load_env_vars()
+        # Load environment variables
+        try:
+            env = load_env_vars()
+        except Exception as e:
+            return jsonify({"error": f"Failed to load environment: {str(e)}"}), 500
+        
+        # Get configuration with better error handling
         dest_host = env.get("dest_host") or env.get("dest")
-        port = int(env["port"])
-        certi = env.get("certi")
-
         if not dest_host:
-            return jsonify({"error": "dest_host not configured"}), 500
+            return jsonify({"error": "dest_host not configured in environment"}), 500
+        
+        port_str = env.get("port")
+        if not port_str:
+            return jsonify({"error": "port not configured in environment"}), 500
+        
+        try:
+            port = int(port_str)
+        except ValueError:
+            return jsonify({"error": f"Invalid port value: {port_str}"}), 500
+        
+        certi = env.get("certi")  # This can be None
 
-        print(f"[API] Transfer: {src} -> {dest_host}:{dest}")
+        print(f"[API] Transfer: {src} -> {dest_host}:{port} -> {dest}")
+        print(f"[API] File size: {len(filedata)} bytes")
         
         # Use QUIC to send file
-        asyncio.run(send_quic_command(
-            host=dest_host,
-            port=port,
-            cert_verify=certi,
-            command="copy",
-            src=os.path.basename(src),
-            dest=dest,
-            filedata=filedata
-        ))
+        try:
+            asyncio.run(send_quic_command(
+                host=dest_host,
+                port=port,
+                cert_verify=certi,
+                command="copy",
+                src=os.path.basename(src),
+                dest=dest,
+                filedata=filedata
+            ))
+        except Exception as e:
+            return jsonify({"error": f"QUIC transfer failed: {str(e)}"}), 500
         
         return jsonify({
             "status": "success",
-            "message": f"Transferred {os.path.basename(src)} to {dest_host}:{dest}"
+            "message": f"Transferred {os.path.basename(src)} to {dest_host}:{dest}",
+            "bytes_transferred": len(filedata)
         }), 200
 
     except Exception as e:
-        print(f"[ERROR] {e}")
-        return jsonify({"error": str(e)}), 500
-
+        print(f"[ERROR] Unexpected error in /transfer: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 @app.route('/delete_remote', methods=['POST'])
 def delete_remote_file():
