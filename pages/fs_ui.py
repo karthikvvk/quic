@@ -210,10 +210,9 @@ with col_actions:
                     st.success(f"✅ Transferred {filename}")
             st.session_state.selected_local_files = []
             st.rerun()
-
     st.divider()
 
-    # Transfer Remote → Local (using the new endpoint)
+    # Transfer Remote → Local (using transferremote)
     st.markdown("**Transfer FROM Remote:**")
     st.code(st.session_state.get("local_path", str(Path.home())), language=None)
     
@@ -221,6 +220,10 @@ with col_actions:
         local_dir = st.session_state.get("local_path", str(Path.home()))
         if not local_dir:
             st.error("Local path not set")
+        elif not dest_host:
+            st.error("Remote host not configured")
+        elif not host_ip:
+            st.error("Local host IP not configured")
         elif not st.session_state.selected_remote_files:
             st.warning("No remote files selected")
         else:
@@ -230,17 +233,24 @@ with col_actions:
                 dest_path = os.path.join(local_dir, filename)
                 
                 data = {
-                    "src": src_path,
-                    "dest": dest_path,
-                    "dest_host": host_ip,   # UI host
-                    "port": 5000            # your UI host Flask port
+                    "src": src_path,              # File path on remote host
+                    "dest": dest_path,            # File path on local (Docker)
+                    "source_host": dest_host,     # Remote host IP (has the file)
+                    "dest_host": host_ip,         # Local Docker IP (destination)
+                    "port": 4433                  # QUIC port
                 }
-                result, error = call_api("transferremote", data, REMOTE_API)
+                
+                st.write(f"Debug: Calling transferremote with data: {data}")  # DEBUG
+                
+                # Call transferremote on LOCAL API (Docker)
+                result, error = call_api("transferremote", data, LOCAL_API)
 
                 if error:
                     st.error(f"❌ {filename}: {error}")
+                    st.write(f"Error details: {error}")  # DEBUG
                 else:
                     st.success(f"✅ Downloaded {filename}")
+                    st.write(f"Result: {result}")  # DEBUG
             st.session_state.selected_remote_files = []
             st.rerun()
 
