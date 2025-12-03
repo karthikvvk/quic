@@ -161,7 +161,7 @@ def transfer():
 
         print(f"[API] Transfer: {src} -> {dest_host}:{port} -> {dest}")
         print(f"[API] File size: {len(filedata)} bytes")
-        
+        print("every variable", src, dest_host, port, certi, dest, override_dest_host, override_port, data)
         # Use QUIC to send file
         try:
             asyncio.run(send_quic_command(
@@ -187,6 +187,85 @@ def transfer():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+
+
+
+
+
+@app.route('/transferremote', methods=['POST'])
+def transfer_remote():
+    """
+    Proxy transfer request to the actual source host's /transfer endpoint.
+    This solves the QUIC stream issue where the stream must originate from the source host.
+
+    Body: {
+        "src": "/absolute/path/to/file/on/source/host",
+        "dest": "/absolute/path/on/destination/host",
+        "source_host": "IP of the host that has the file",
+        "dest_host": "IP of the destination host (optional, uses env if not provided)",
+        "port": "QUIC port (optional, uses env if not provided)"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        
+        src = data.get('src')
+        dest = data.get('dest')
+        source_host = data.get('source_host')
+        
+        if not src:
+            return jsonify({"error": "src (source file path) is required"}), 400
+        if not dest:
+            return jsonify({"error": "dest (destination file path) is required"}), 400
+        if not source_host:
+            return jsonify({"error": "source_host (IP of host with the file) is required"}), 400
+        
+        # Prepare the payload for the source host's /transfer endpoint
+        transfer_payload = {
+            "src": src,
+            "dest": dest
+        }
+        
+        # Include optional overrides if provided
+        if data.get("dest_host"):
+            transfer_payload["dest_host"] = data.get("dest_host")
+        if data.get("port"):
+            transfer_payload["port"] = data.get("port")
+        
+        # Call the /transfer endpoint on the source host
+        source_url = f"http://{source_host}:5000/transfer"
+        
+        print(f"[API] TransferRemote: Calling {source_url} with payload: {transfer_payload}")
+        
+        try:
+            response = requests.post(source_url, json=transfer_payload, timeout=30)
+            response.raise_for_status()
+            
+            # Return the response from the source host
+            return jsonify(response.json()), response.status_code
+            
+        except requests.exceptions.Timeout:
+            return jsonify({"error": f"Timeout connecting to source host {source_host}"}), 504
+        except requests.exceptions.ConnectionError:
+            return jsonify({"error": f"Could not connect to source host {source_host}:5000"}), 503
+        except requests.exceptions.HTTPError as e:
+            return jsonify({"error": f"HTTP error from source host: {str(e)}"}), response.status_code
+        except Exception as e:
+            return jsonify({"error": f"Failed to call source host: {str(e)}"}), 500
+
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in /transferremote: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+
 
 @app.route('/delete_remote', methods=['POST'])
 def delete_remote_file():

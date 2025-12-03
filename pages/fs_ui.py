@@ -235,7 +235,7 @@ with col_actions:
                     "dest_host": host_ip,   # UI host
                     "port": 5000            # your UI host Flask port
                 }
-                result, error = call_api("transfer", data, REMOTE_API)
+                result, error = call_api("transferremote", data, REMOTE_API)
 
                 if error:
                     st.error(f"❌ {filename}: {error}")
