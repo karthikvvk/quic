@@ -385,11 +385,17 @@ def osinfo():
         return jsonify({"error": str(e)}), 500
 
 
+import os
+from datetime import datetime
+from flask import request, jsonify
+
 @app.route('/listdir', methods=['POST'])
 def list_directory():
     """
     List directory contents on THIS peer
     POST body: {"path": "/absolute/path"}
+    - Windows: keep current behavior (list of names)
+    - Linux: identify only file or directory
     """
     try:
         data = request.get_json()
@@ -398,17 +404,17 @@ def list_directory():
         if not path:
             return jsonify({"status": "error", "message": "path is required"}), 400
 
-        # Normalize path (handles both Windows and Linux)
+        # Normalize path
         path = os.path.normpath(path)
         
-        # Handle Windows drive letters properly
+        # Handle Windows drive letters
         if os.name == 'nt' and len(path) == 2 and path[1] == ':':
             path = path + os.sep
 
         if not os.path.exists(path):
             return jsonify({"status": "error", "message": f"Path does not exist: {path}"}), 404
 
-        # Check if it's a file
+        # File response (same as before)
         if os.path.isfile(path):
             st = os.stat(path)
             info = {
@@ -419,7 +425,7 @@ def list_directory():
             }
             return jsonify({"status": "success", "type": "file", "info": info}), 200
 
-        # Check if it's a directory
+        # Directory response
         if os.path.isdir(path):
             try:
                 items = sorted(os.listdir(path))
@@ -428,15 +434,38 @@ def list_directory():
             except Exception as e:
                 return jsonify({"status": "error", "message": f"Listing failed: {str(e)}"}), 500
 
-            return jsonify({"status": "success", "type": "directory", "files": items}), 200
+            # Windows → keep original behavior (list of names)
+            if os.name == 'nt':
+                return jsonify({"status": "success", "type": "directory", "files": items}), 200
 
-        # If it's neither file nor directory (symlink, socket, etc.)
-        return jsonify({"status": "error", "message": f"Unsupported filesystem object: {path}"}), 400
+            # Linux → return simple file/dir identification
+            files_info = []
+            for name in items:
+                full = os.path.join(path, name)
+
+                if os.path.isdir(full):
+                    ftype = "directory"
+                elif os.path.isfile(full):
+                    ftype = "file"
+                else:
+                    # treat anything else as file to avoid complexity
+                    ftype = "file"
+
+                files_info.append({
+                    "name": name,
+                    "type": ftype
+                })
+
+            return jsonify({"status": "success", "type": "directory", "files": files_info}), 200
+
+        # Unsupported
+        return jsonify({"status": "error", "message": f"Unsupported object: {path}"}), 400
 
     except Exception as e:
         import traceback
-        traceback.print_exc()  # Log the full error for debugging
+        traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)
