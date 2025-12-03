@@ -229,9 +229,14 @@ with col_actions:
                 filename = os.path.basename(src_path)
                 dest_path = os.path.join(local_dir, filename)
                 
-                # Use the new transfer_from_remote endpoint on LOCAL API
-                data = {"src": src_path, "dest": dest_path}
+                data = {
+                    "src": src_path,
+                    "dest": dest_path,
+                    "dest_host": host_ip,   # UI host
+                    "port": 5000            # your UI host Flask port
+                }
                 result, error = call_api("transfer", data, REMOTE_API)
+
                 if error:
                     st.error(f"❌ {filename}: {error}")
                 else:

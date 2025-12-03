@@ -103,58 +103,6 @@ def get_OS_TYPE(REMOTE_HOST=""):
         return {"os": "linux", "user": None}
 
 
-
-# @app.route('/transfer_from_remote', methods=['POST'])
-# def transfer_from_remote():
-#     """
-#     Transfer file FROM remote peer TO local via QUIC
-#     Body: {
-#         "src": "/absolute/path/on/remote",
-#         "dest": "/absolute/path/to/local/destination"
-#     }
-#     """
-#     try:
-#         data = request.get_json()
-#         src = data.get('src')
-#         dest = data.get('dest')
-
-#         if not src:
-#             return jsonify({"error": "src (remote source path) is required"}), 400
-#         if not dest:
-#             return jsonify({"error": "dest (local destination path) is required"}), 400
-
-#         env = load_env_vars()
-#         dest_host = env.get("dest_host") or env.get("dest")
-#         port = int(env["port"])
-#         certi = env.get("certi")
-
-#         if not dest_host:
-#             return jsonify({"error": "dest_host not configured"}), 500
-
-#         print(f"[API] Transfer from remote: {dest_host}:{src} -> {dest}")
-        
-#         # Use QUIC to request file from remote (you'll need to implement "fetch" command)
-#         asyncio.run(send_quic_command(
-#             host=dest_host,
-#             port=port,
-#             cert_verify=certi,
-#             command="fetch",  # New command to GET file from remote
-#             src=src,
-#             dest=dest,
-#             filedata=b""
-#         ))
-        
-#         return jsonify({
-#             "status": "success",
-#             "message": f"Downloaded {os.path.basename(src)} from {dest_host} to {dest}"
-#         }), 200
-
-#     except Exception as e:
-#         print(f"[ERROR] {e}")
-#         return jsonify({"error": str(e)}), 500
-
-
-
 @app.route('/transfer', methods=['POST'])
 def transfer():
     """
@@ -166,7 +114,9 @@ def transfer():
     """
     try:
         data = request.get_json()
-        
+        override_dest_host = data.get("dest_host")
+        override_port = data.get("port")
+
         # Add validation
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
@@ -203,18 +153,9 @@ def transfer():
             return jsonify({"error": f"Failed to load environment: {str(e)}"}), 500
         
         # Get configuration with better error handling
-        dest_host = env.get("dest_host") or env.get("dest")
-        if not dest_host:
-            return jsonify({"error": "dest_host not configured in environment"}), 500
-        
-        port_str = env.get("port")
-        if not port_str:
-            return jsonify({"error": "port not configured in environment"}), 500
-        
-        try:
-            port = int(port_str)
-        except ValueError:
-            return jsonify({"error": f"Invalid port value: {port_str}"}), 500
+        dest_host = override_dest_host or env.get("dest_host") or env.get("dest")
+        port = int(override_port or env["port"])
+
         
         certi = env.get("certi")  # This can be None
 
