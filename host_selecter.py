@@ -155,11 +155,11 @@ for i, h in enumerate(display_hosts):
         st.session_state["REMOTE_PASS"] = ""  # no password required
         st.session_state["remote_override_api"] = f"http://{sel_ip}:5000"
 
-        # # optional backend connect probe (best-effort)
-        # try:
-        #     requests.get(f"{BACKEND.rstrip('/')}/connect", timeout=2)
-        # except Exception:
-        #     pass
+        # optional backend connect probe (best-effort)
+        try:
+            requests.get(f"{BACKEND.rstrip('/')}/connect")
+        except Exception:
+            pass
 
         st.success(f"Selected host {sel_user}@{sel_ip} — DEST_HOST updated.")
 
