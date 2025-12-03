@@ -217,7 +217,7 @@ with col_actions:
     st.markdown("**Transfer FROM Remote:**")
     st.code(st.session_state.get("local_path", str(Path.home())), language=None)
     
-    if st.button("⬅️ ← Transfer", use_container_width=True, key="transfer_from_remote"):
+    if st.button("⬅️ ← Transfer", use_container_width=True, key="transfer"):
         local_dir = st.session_state.get("local_path", str(Path.home()))
         if not local_dir:
             st.error("Local path not set")
@@ -231,7 +231,7 @@ with col_actions:
                 
                 # Use the new transfer_from_remote endpoint on LOCAL API
                 data = {"src": src_path, "dest": dest_path}
-                result, error = call_api("transfer_from_remote", data, REMOTE_API)
+                result, error = call_api("transfer", data, REMOTE_API)
                 if error:
                     st.error(f"❌ {filename}: {error}")
                 else:
