@@ -21,7 +21,7 @@ host_ip, user, certi, sys, interface, outdir, srcdir, port = (
     env["port"],
 )
 # Build backend base url strictly from HOST + port
-BACKEND = f"http://{host_ip}:{port}"
+BACKEND = f"http://{host_ip}:5000"
 
 # ---------- UI ----------
 st.title("🌐 Select Network Host")

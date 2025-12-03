@@ -368,7 +368,7 @@ def listhost():
         if subck:
             res = get_OS_TYPE(ip)
             username = res.get("user")
-            result.append({"host": ip, "user": username})
+            result.append({"host": ip, "user": username, "os": res.get("os", "linux")})
 
     return jsonify(result)
 
