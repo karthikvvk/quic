@@ -19,10 +19,9 @@ CHUNK_SIZE = 64 * 1024  # 64KB
 ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
-
 async def send_quic_command(host, port, cert_verify, command, src="", dest="", filedata=b""):
     """
-    Send a command to remote QUIC server
+    Send a command to remote QUIC server with improved reliability
     - command: "copy", "move", "create", "delete"
     - src: source path (for delete/create operations)
     - dest: destination path (for copy/move operations)
@@ -40,7 +39,8 @@ async def send_quic_command(host, port, cert_verify, command, src="", dest="", f
             header = json.dumps({
                 "command": command,
                 "src": src,
-                "dest": dest
+                "dest": dest,
+                "size": len(filedata)  # Add size for verification
             }).encode()
             
             print(f"[QUIC] Sending command: {command}, src: {src}, dest: {dest}")
@@ -49,30 +49,72 @@ async def send_quic_command(host, port, cert_verify, command, src="", dest="", f
             client._quic.send_stream_data(stream_id, header + b"\n", end_stream=False)
             client.transmit()
             
+            # Wait for header to be acknowledged
+            await asyncio.sleep(0.1)
+            
             # Send file data if present
             if filedata:
                 print(f"[QUIC] Sending {len(filedata)} bytes")
                 offset = 0
-                while offset < len(filedata):
+                total_size = len(filedata)
+                
+                while offset < total_size:
                     chunk = filedata[offset:offset + CHUNK_SIZE]
-                    is_last = (offset + len(chunk)) >= len(filedata)
+                    is_last = (offset + len(chunk)) >= total_size
+                    
                     client._quic.send_stream_data(stream_id, chunk, end_stream=is_last)
                     client.transmit()
+                    
                     offset += len(chunk)
-                    await asyncio.sleep(0.01)  # Small delay between chunks
+                    
+                    # Progress feedback
+                    if offset % (CHUNK_SIZE * 10) == 0 or is_last:
+                        progress = (offset / total_size) * 100
+                        print(f"[QUIC] Progress: {progress:.1f}% ({offset}/{total_size} bytes)")
+                    
+                    # Adaptive delay based on chunk size
+                    await asyncio.sleep(0.02)
+                
+                # Wait longer for large files
+                wait_time = min(2.0, 0.5 + (total_size / (1024 * 1024)))  # Scale with file size
+                print(f"[QUIC] Waiting {wait_time:.2f}s for transmission to complete...")
+                await asyncio.sleep(wait_time)
+                
             else:
                 # No file data, close stream
                 client._quic.send_stream_data(stream_id, b"", end_stream=True)
                 client.transmit()
+                await asyncio.sleep(0.5)
             
-            # Wait for transmission to complete
-            await asyncio.sleep(0.5)
+            # Try to receive acknowledgment (if server implements it)
+            try:
+                # Wait a bit for potential response
+                await asyncio.sleep(0.2)
+                
+                # Check for any received data on the stream
+                events = client._quic._events
+                for event in events:
+                    if hasattr(event, 'stream_id') and event.stream_id == stream_id:
+                        if hasattr(event, 'data'):
+                            response = event.data.decode('utf-8', errors='ignore')
+                            print(f"[QUIC] Server response: {response}")
+            except Exception as e:
+                # Acknowledgment is optional, don't fail if not present
+                print(f"[QUIC] No acknowledgment received (this is OK): {e}")
+            
             print(f"[QUIC] Command sent successfully")
             
+    except ConnectionRefusedError:
+        print(f"[QUIC] Connection refused by {host}:{port}")
+        raise Exception(f"Cannot connect to {host}:{port} - is the QUIC server running?")
+    except asyncio.TimeoutError:
+        print(f"[QUIC] Timeout connecting to {host}:{port}")
+        raise Exception(f"Timeout connecting to {host}:{port}")
     except Exception as e:
         print(f"[QUIC] Error: {e}")
+        import traceback
+        traceback.print_exc()
         raise
-
 
 def check_subnet(ip):
     env = load_env_vars()
@@ -103,21 +145,21 @@ def get_OS_TYPE(REMOTE_HOST=""):
         return {"os": "linux", "user": None}
 
 
+
+
+
+# Alternative: Add retry logic in the transfer endpoint
 @app.route('/transfer', methods=['POST'])
 def transfer():
     """
-    Transfer file to remote peer via QUIC
-    Body: {
-        "src": "/absolute/path/to/local/file",
-        "dest": "/absolute/path/on/remote/where/file/should/be/written"
-    }
+    Transfer file to remote peer via QUIC with retry logic
     """
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0
+    
     try:
         data = request.get_json()
-        override_dest_host = data.get("dest_host")
-        override_port = data.get("port")
-
-        # Add validation
+        
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
             
@@ -129,15 +171,12 @@ def transfer():
         if not dest:
             return jsonify({"error": "dest (destination file path) is required"}), 400
 
-        # Verify source exists locally
         if not os.path.exists(src):
             return jsonify({"error": f"Source file not found: {src}"}), 404
         
-        # Check if it's actually a file, not a directory
         if not os.path.isfile(src):
             return jsonify({"error": f"Source is not a file: {src}"}), 400
 
-        # Read file data
         try:
             with open(src, "rb") as f:
                 filedata = f.read()
@@ -146,50 +185,75 @@ def transfer():
         except Exception as e:
             return jsonify({"error": f"Failed to read file: {str(e)}"}), 500
 
-        # Load environment variables
         try:
             env = load_env_vars()
         except Exception as e:
             return jsonify({"error": f"Failed to load environment: {str(e)}"}), 500
         
-        # Get configuration with better error handling
-        dest_host = override_dest_host or env.get("dest_host") or env.get("dest")
-        port = int(override_port or env["port"])
-
+        dest_host = env.get("dest_host") or env.get("dest")
+        if not dest_host:
+            return jsonify({"error": "dest_host not configured in environment"}), 500
         
-        certi = env.get("certi")  # This can be None
+        port_str = env.get("port")
+        if not port_str:
+            return jsonify({"error": "port not configured in environment"}), 500
+        
+        try:
+            port = int(port_str)
+        except ValueError:
+            return jsonify({"error": f"Invalid port value: {port_str}"}), 500
+        
+        certi = env.get("certi")
 
         print(f"[API] Transfer: {src} -> {dest_host}:{port} -> {dest}")
         print(f"[API] File size: {len(filedata)} bytes")
-        print("every variable", src, dest_host, port, certi, dest, override_dest_host, override_port, data)
-        # Use QUIC to send file
-        try:
-            asyncio.run(send_quic_command(
-                host=dest_host,
-                port=port,
-                cert_verify=certi,
-                command="copy",
-                src=os.path.basename(src),
-                dest=dest,
-                filedata=filedata
-            ))
-        except Exception as e:
-            return jsonify({"error": f"QUIC transfer failed: {str(e)}"}), 500
         
+        # Retry logic
+        last_error = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                print(f"[API] Transfer attempt {attempt}/{MAX_RETRIES}")
+                
+                asyncio.run(send_quic_command(
+                    host=dest_host,
+                    port=port,
+                    cert_verify=certi,
+                    command="copy",
+                    src=os.path.basename(src),
+                    dest=dest,
+                    filedata=filedata
+                ))
+                
+                # If we get here, transfer succeeded
+                print(f"[API] Transfer successful on attempt {attempt}")
+                return jsonify({
+                    "status": "success",
+                    "message": f"Transferred {os.path.basename(src)} to {dest_host}:{dest}",
+                    "bytes_transferred": len(filedata),
+                    "attempts": attempt
+                }), 200
+                
+            except Exception as e:
+                last_error = e
+                print(f"[API] Attempt {attempt} failed: {str(e)}")
+                
+                if attempt < MAX_RETRIES:
+                    print(f"[API] Retrying in {RETRY_DELAY}s...")
+                    import time
+                    time.sleep(RETRY_DELAY)
+                else:
+                    print(f"[API] All {MAX_RETRIES} attempts failed")
+        
+        # If we get here, all retries failed
         return jsonify({
-            "status": "success",
-            "message": f"Transferred {os.path.basename(src)} to {dest_host}:{dest}",
-            "bytes_transferred": len(filedata)
-        }), 200
+            "error": f"QUIC transfer failed after {MAX_RETRIES} attempts: {str(last_error)}"
+        }), 500
 
     except Exception as e:
         print(f"[ERROR] Unexpected error in /transfer: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-
-
 
 
 
