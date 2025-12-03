@@ -93,7 +93,7 @@ def check_subnet(ip):
 def get_OS_TYPE(REMOTE_HOST=""):
     try:
         response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", 
-                                json={"request": "osinfo"}, timeout=5)
+                                json={"request": "osinfo"})
         if response.status_code == 200:
             data = response.json()
             return {"os": data.get("os", "linux"), "user": data.get("user")}
@@ -243,7 +243,7 @@ def transfer_remote():
         print(f"[API] TransferRemote: Calling {source_url} with payload: {transfer_payload}")
         
         try:
-            response = requests.post(source_url, json=transfer_payload, timeout=30)
+            response = requests.post(source_url, json=transfer_payload)
             response.raise_for_status()
             
             # Return the response from the source host

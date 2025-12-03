@@ -33,7 +33,7 @@ def call_api(endpoint, data, base_url):
         return None, f"Base URL not configured for endpoint {endpoint}"
     url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
     try:
-        resp = requests.post(url, json=data, timeout=10)
+        resp = requests.post(url, json=data)
         resp.raise_for_status()
         try:
             return resp.json(), None

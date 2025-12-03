@@ -49,7 +49,7 @@ def fetch_hosts():
     """
     try:
         url = f"{BACKEND.rstrip('/')}/listhost"
-        r = requests.get(url, timeout=6)
+        r = requests.get(url)
         if r.status_code == 200:
             try:
                 data = r.json()

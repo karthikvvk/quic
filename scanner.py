@@ -72,7 +72,7 @@ def gethostlist():
 def scanfromlinux():
     """Scan network using nmap on Linux"""
     global gateway, cidr, file_path
-    
+    print("iam called")
     checkfile()
     
     network = f"{gateway}/{cidr}"
@@ -107,7 +107,6 @@ def ping_silent(ip):
             ["ping", "-n", "1", "-w", "100", ip],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=1
         )
     except:
         pass
@@ -161,7 +160,7 @@ def scanfromwin():
             ["arp", "-a"], 
             capture_output=True, 
             text=True,
-            timeout=5
+            
         )
         output = result.stdout
         
