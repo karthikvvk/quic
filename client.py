@@ -398,11 +398,17 @@ def list_directory():
         if not path:
             return jsonify({"status": "error", "message": "path is required"}), 400
 
+        # Normalize path (handles both Windows and Linux)
         path = os.path.normpath(path)
+        
+        # Handle Windows drive letters properly
+        if os.name == 'nt' and len(path) == 2 and path[1] == ':':
+            path = path + os.sep
 
         if not os.path.exists(path):
             return jsonify({"status": "error", "message": f"Path does not exist: {path}"}), 404
 
+        # Check if it's a file
         if os.path.isfile(path):
             st = os.stat(path)
             info = {
@@ -413,6 +419,7 @@ def list_directory():
             }
             return jsonify({"status": "success", "type": "file", "info": info}), 200
 
+        # Check if it's a directory
         if os.path.isdir(path):
             try:
                 items = sorted(os.listdir(path))
@@ -423,11 +430,13 @@ def list_directory():
 
             return jsonify({"status": "success", "type": "directory", "files": items}), 200
 
-        return jsonify({"status": "error", "message": f"Unknown filesystem object: {path}"}), 400
+        # If it's neither file nor directory (symlink, socket, etc.)
+        return jsonify({"status": "error", "message": f"Unsupported filesystem object: {path}"}), 400
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # Log the full error for debugging
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)

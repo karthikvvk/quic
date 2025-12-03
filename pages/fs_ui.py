@@ -42,21 +42,22 @@ def call_api(endpoint, data, base_url):
     except requests.exceptions.RequestException as e:
         return None, str(e)
 
-
 def render_tree(base_url, path_state_key, key_prefix, selected_key):
     """Render file tree for a peer"""
     try:
         current_path = st.session_state.get(path_state_key, "/")
         if not current_path:
-            current_path = "/"
+            current_path = "/" if os.name != 'nt' else str(Path.home())
             st.session_state[path_state_key] = current_path
 
         # Parent navigation
-        parent = os.path.dirname(current_path.rstrip("/"))
+        parent = os.path.dirname(current_path.rstrip("/\\"))
         cols = st.columns([1, 9])
         with cols[0]:
-            if parent and st.button("⬆️", key=f"{key_prefix}_up_{current_path}", help="Go up"):
-                st.session_state[path_state_key] = parent or "/"
+            # Don't show up button at root
+            can_go_up = parent and parent != current_path
+            if can_go_up and st.button("⬆️", key=f"{key_prefix}_up_{current_path}", help="Go up"):
+                st.session_state[path_state_key] = parent or ("/" if os.name != 'nt' else "C:\\")
                 st.rerun()
         with cols[1]:
             st.markdown(f"**`{current_path}`**")
@@ -71,7 +72,16 @@ def render_tree(base_url, path_state_key, key_prefix, selected_key):
             st.error(f"Failed to list directory: {err}")
             return
         
-        items = resp.get("files", []) if isinstance(resp, dict) else []
+        if not isinstance(resp, dict):
+            st.error(f"Invalid response format: {resp}")
+            return
+            
+        # Handle if current path is actually a file
+        if resp.get("type") == "file":
+            st.info("📄 This is a file, not a directory")
+            return
+        
+        items = resp.get("files", [])
         if not items:
             st.info("📂 Empty directory")
             return
@@ -80,13 +90,20 @@ def render_tree(base_url, path_state_key, key_prefix, selected_key):
             st.session_state[selected_key] = []
 
         # Render items
-        for item in sorted(items):
-            full_path = os.path.join(current_path, item)
+        for item in items:
+            # Build full path properly for both Windows and Linux
+            if current_path.endswith(os.sep):
+                full_path = current_path + item
+            else:
+                full_path = os.path.join(current_path, item)
             
-            # Check if it's a directory
+            # Probe to check if it's a directory
             probe, probe_err = call_api("listdir", {"path": full_path}, base_url)
-            is_directory = (not probe_err and isinstance(probe, dict) and 
-                          probe.get("type") == "directory")
+            
+            # Determine if it's a directory based on response
+            is_directory = False
+            if not probe_err and isinstance(probe, dict):
+                is_directory = (probe.get("type") == "directory")
 
             if is_directory:
                 btn_key = f"{key_prefix}_folder_{full_path}"
@@ -107,7 +124,8 @@ def render_tree(base_url, path_state_key, key_prefix, selected_key):
                     
     except Exception as e:
         st.error(f"Error rendering tree: {e}")
-
+        import traceback
+        st.code(traceback.format_exc())  # Show full traceback for debugging
 
 # ---------- Session State Init ----------
 if "local_path" not in st.session_state:
