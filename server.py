@@ -76,6 +76,62 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                             f.write(filedata)
                         print(f"[+] {command.capitalize()}d to {target_path} ({len(filedata)} bytes)")
 
+                    elif command == "fetch":
+                        # NEW: Handle fetch command - send file back to requester
+                        if not src:
+                            print(f"[!] Fetch requires 'src' path")
+                            self._send_error_response(stream_id, "src path required")
+                            return
+                        
+                        source_path = _safe_path(src)
+                        
+                        if not os.path.exists(source_path):
+                            print(f"[!] File not found: {source_path}")
+                            self._send_error_response(stream_id, f"File not found: {source_path}")
+                            return
+                        
+                        if not os.path.isfile(source_path):
+                            print(f"[!] Not a file: {source_path}")
+                            self._send_error_response(stream_id, f"Not a file: {source_path}")
+                            return
+                        
+                        # Read the file
+                        try:
+                            with open(source_path, "rb") as f:
+                                file_content = f.read()
+                            
+                            # Send file back
+                            response_stream_id = self._quic.get_next_available_stream_id()
+                            
+                            # Send response header
+                            response_header = json.dumps({
+                                "status": "success",
+                                "src": src,
+                                "size": len(file_content)
+                            }).encode()
+                            
+                            self._quic.send_stream_data(response_stream_id, response_header + b"\n", end_stream=False)
+                            self.transmit()
+                            
+                            # Send file data in chunks
+                            CHUNK_SIZE = 64 * 1024
+                            offset = 0
+                            while offset < len(file_content):
+                                chunk = file_content[offset:offset + CHUNK_SIZE]
+                                is_last = (offset + len(chunk)) >= len(file_content)
+                                self._quic.send_stream_data(response_stream_id, chunk, end_stream=is_last)
+                                self.transmit()
+                                offset += len(chunk)
+                            
+                            print(f"[+] Sent file {source_path} ({len(file_content)} bytes)")
+                            
+                        except PermissionError:
+                            print(f"[!] Permission denied: {source_path}")
+                            self._send_error_response(stream_id, f"Permission denied: {source_path}")
+                        except Exception as e:
+                            print(f"[!] Error reading file: {e}")
+                            self._send_error_response(stream_id, f"Error reading file: {str(e)}")
+
                     elif command == "create":
                         if not src:
                             print(f"[!] Create requires 'src' path")
@@ -108,6 +164,19 @@ class FileReceiverProtocol(QuicConnectionProtocol):
                     print(f"[!] Path error: {ve}")
                 except Exception as e:
                     print(f"[!] Operation error: {e}")
+    
+    def _send_error_response(self, stream_id, error_msg):
+        """Send error response back to client"""
+        try:
+            response_stream_id = self._quic.get_next_available_stream_id()
+            error_header = json.dumps({
+                "status": "error",
+                "error": error_msg
+            }).encode()
+            self._quic.send_stream_data(response_stream_id, error_header + b"\n", end_stream=True)
+            self.transmit()
+        except Exception as e:
+            print(f"[!] Failed to send error response: {e}")
 
 
 async def main(host, port, cert, key):
@@ -117,6 +186,7 @@ async def main(host, port, cert, key):
     print(f"  Host: {host}")
     print(f"  Port: {port}")
     print(f"  Certificate: {cert}")
+    print(f"  Supported commands: copy, move, create, delete, fetch")
     print(f"  Listening for file operations...")
     print()
     

@@ -231,7 +231,7 @@ with col_actions:
                 
                 # Use the new transfer_from_remote endpoint on LOCAL API
                 data = {"src": src_path, "dest": dest_path}
-                result, error = call_api("transfer_from_remote", data, LOCAL_API)
+                result, error = call_api("transfer_from_remote", data, REMOTE_API)
                 if error:
                     st.error(f"❌ {filename}: {error}")
                 else:
