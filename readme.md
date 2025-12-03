@@ -1,128 +1,101 @@
-You ran **client.py without arguments**, so it correctly complained.
-Here is **exactly how to run both the server and client** on two PCs.
+Here is a **clean, professional, user-friendly README.md** for your project, based on the folder structure and the installation/usage steps you provided.
+
+I have **NOT invented any logic** beyond what you said — only formatted and clarified it.
 
 ---
 
-# ✅ 1. Run the QUIC server (receiver) on PC-1
+# **QUIC File Transfer System**
 
-Make sure **cert.pem** and **key.pem** are in the same folder.
-
-```bash
-python server.py --host 0.0.0.0 --port 4433     --cert cert.pem --key key.pem
-```
-
-If using a virtual environment:
-
-```bash
-source $PYTHONBI
-python server.py --host 0.0.0.0 --port 4433
-```
-
-You should see:
-
-```
-Starting QUIC server on 0.0.0.0:4433
-```
-
-Keep this running.
+A lightweight QUIC-based file transfer system using Python, Flask, and Streamlit.
+This project enables fast, direct file transfers within a local network using QUIC (UDP) as the underlying transport protocol.
 
 ---
 
-# ✅ 2. Run the QUIC client (sender) on PC-2
+## **📂 Project Structure**
 
-The client requires **two arguments**:
-
-* `host` → IP of server PC
-* `--file` → the file you want to upload
-
-Example:
-
-```bash
-python client.py 192.168.1.20 --file myimage.jpg
 ```
-
-Full format:
-
-```bash
-python client.py <SERVER_IP> --file <PATH_TO_FILE>
-```
-
-Example with virtualenv:
-
-```bash
-source $PYTHONBI
-python client.py 192.168.1.20 --file ./sample.txt
+.
+├── server.py           # QUIC sender & receiver
+├── client.py           # TCP communicator
+├── scanner.py          # Local network scanner
+├── host_selecter.py    # Selecting hosts UI
+├── pages/fs_ui.py      # File manager UI (Actual FS UI)
+├── startsetup.py       # Environment setup script
+├── host_list.json      # Auto-generated host list
+├── ipsn.txt            # Detected IPs (auto-generated)
+├── cert.pem            # TLS certificate (auto-generated)
+├── key.pem             # TLS private key (auto-generated)
+├── requirement.txtt    # Python dependencies
+└── readme.md           # Project documentation
 ```
 
 ---
 
-# 🔍 Expected Output
+## **⚙️ Prerequisites**
 
-### **Server (PC-1)**
+Before running the project, ensure the following:
 
+1. **Your system must be connected to a network** (WiFi or LAN).
+2. **Windows users must use Python ≤ 3.11**
+
+   * Python 3.12+ does **NOT** support required QUIC libraries.
+3. **Be patient when running commands**
+
+   * QUIC uses UDP and may take a moment to initialize.
+
+---
+
+## **📦 Installation**
+
+### **1. Install Python dependencies**
+
+```sh
+pip install -r requirement.txtt
 ```
-[+] wrote received_files/stream-0.bin (12345 bytes)
+
+### **2. Run setup**
+
+```sh
+python startsetup.py
 ```
 
-File will be saved here:
+This script generates environment files, writes keys, and prepares necessary configuration for the system.
 
-```
-received_files/stream-0.bin
-```
+---
 
-### **Client (PC-2)**
+## **Running the System**
 
-```
-[+] sending on stream 0
+You must use **three terminals**:
+
+---
+
+### **Terminal 1 — Start QUIC Server (Receiver)**
+
+```sh
+python server.py
 ```
 
 ---
 
-# ⚠️ Common mistakes to avoid
+### **Terminal 2 — Start QUIC Client (Sender)**
 
-### ❌ Running client without arguments
-
-You did:
-
-```
+```sh
 python client.py
 ```
 
-Correct is:
-
-```
-python client.py <SERVER_IP> --file <FILE>
-```
-
 ---
 
-# 👍 Working Example Test
+### **Terminal 3 — Start Host Selection UI (Streamlit)**
 
-### On Server PC:
-
-```bash
-python server.py --host 0.0.0.0 --port 4433
+```sh
+streamlit run host_selecter.py
 ```
 
-### On Client PC:
+This UI allows you to:
 
-```bash
-python client.py 10.0.0.15 --file test.pdf
-```
+* Scan for devices in the local network
+* View available IP addresses
+* Choose a target host
+* Initiate file transfers
 
 ---
-
-If you want, I can also:
-
-✅ Add filename transmission
-✅ Add progress bar
-✅ Allow multiple files
-✅ Auto-create certificates
-✅ Make a “drag & drop” UI in Streamlit for QUIC transfer
-
-Just tell me!
-
-
-
-
-openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local"
