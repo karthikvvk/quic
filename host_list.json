@@ -4,5 +4,11 @@
         "username": "unknown",
         "password": "",
         "os_type": "unknown"
+    },
+    {
+        "ip": "192.168.0.100",
+        "username": "venkat",
+        "password": "",
+        "os_type": "windows"
     }
 ]

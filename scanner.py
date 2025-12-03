@@ -4,6 +4,9 @@ import subprocess
 import platform
 import re
 import threading
+from ipaddress import IPv4Network, IPv4Address
+import concurrent.futures
+from typing import List
 from dotenv import load_dotenv
 
 # Global variables
@@ -69,35 +72,155 @@ def gethostlist():
         return []
 
 
+
+
+
+
+
+
+
+
+
+# ----------------- Linux scanning integration ----------------- #
 def scanfromlinux():
-    """Scan network using nmap on Linux"""
+    """Scan network using multiple methods on Linux (no sudo required).
+    Returns: list of IPs that are up (List[str]) — no extra parsing; uses env values.
+    """
     global gateway, cidr, file_path
-    print("iam called")
+
     checkfile()
-    
-    network = f"{gateway}/{cidr}"
-    print(f"[*] Scanning network: {network}")
-    
+
+    # Validate env values
+    if not gateway:
+        print("[!] GATEWAY not set in environment (GATEWAY).", file=os.sys.stderr)
+        return []
     try:
-        result = subprocess.check_output(
-            ["nmap", "-sn", "-PR", "-n", network], 
-            text=True,
-            stderr=subprocess.DEVNULL
-        )
-        
-        unique_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', result)
-        unique_ips = list(set(unique_ips))
-        
-        print(f"[+] Found {len(unique_ips)} hosts")
-        append_host(unique_ips)
-        return unique_ips
-        
-    except subprocess.CalledProcessError as e:
-        print(f"[!] nmap error: {e}")
+        network = f"{gateway}/{cidr}"
+        # Validate network by constructing IPv4Network
+        IPv4Network(network, strict=False)
+    except Exception as e:
+        print(f"[!] Invalid network from GATEWAY/CIDR: {e}", file=os.sys.stderr)
         return []
-    except FileNotFoundError:
-        print("[!] nmap not found. Please install: sudo apt install nmap")
+
+    # Methods to try in order
+    methods = [
+        ("nmap_unprivileged", _scan_nmap_unprivileged),
+        ("arp_neigh", _scan_arp_table),
+        ("ping_sweep", _scan_ping_sweep),
+    ]
+
+    for name, func in methods:
+        try:
+            found = func(network)
+            if found:
+                # update file and return the list
+                append_host(found)
+                return found
+        except Exception as e:
+            # keep trying other methods on any failure
+            print(f"[!] {name} failed: {e}", file=os.sys.stderr)
+            continue
+
+    # nothing found
+    return []
+
+
+def _scan_nmap_unprivileged(network: str, ports: str = "22,80,443,445", timeout: int = 120) -> List[str]:
+    """Use nmap -sT (TCP connect) without root. Returns list of IPs (strings)."""
+    try:
+        # check nmap exists
+        try:
+            subprocess.run(["nmap", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            # nmap not installed
+            return []
+
+        args = ["nmap", "-Pn", "-sT", "-p", ports, "-T4", "--open", network]
+        # Run with a timeout to avoid hanging
+        result = subprocess.check_output(args, text=True, stderr=subprocess.STDOUT, timeout=timeout)
+
+        found = re.findall(r'Nmap scan report for (\d{1,3}(?:\.\d{1,3}){3})', result)
+        unique = sorted(set(found))
+        return unique
+    except subprocess.TimeoutExpired:
         return []
+    except Exception:
+        return []
+
+
+def _ping_silent_linux(ip: str) -> None:
+    """Silent ping to populate ARP/neighbor table on Linux"""
+    try:
+        subprocess.run(["ping", "-c", "1", "-W", "1", ip],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+    except Exception:
+        pass
+
+
+def _scan_arp_table(network: str) -> List[str]:
+    """
+    Populate ARP/neighbor table via pinging a subset and then read `ip neigh`.
+    Returns list of IPs present in the neighbor table that belong to `network`.
+    """
+    try:
+        net = IPv4Network(network, strict=False)
+    except Exception:
+        return []
+
+    all_ips = [str(ip) for ip in net]
+
+    # Avoid huge pre-population runs. Limit to 1024 addresses max.
+    if len(all_ips) > 1024:
+        all_ips = all_ips[:1024]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as ex:
+        list(ex.map(_ping_silent_linux, all_ips))
+
+    try:
+        out = subprocess.check_output(["ip", "neigh"], text=True)
+    except Exception:
+        return []
+
+    ips = set(re.findall(r'(\d{1,3}(?:\.\d{1,3}){3})', out))
+    filtered = [ip for ip in sorted(ips) if IPv4Address(ip) in net]
+    return filtered
+
+
+def _scan_ping_sweep(network: str) -> List[str]:
+    """Parallel ping sweep of the network. Returns list of alive IPs."""
+    try:
+        net = IPv4Network(network, strict=False)
+    except Exception:
+        return []
+
+    ip_list = [str(ip) for ip in net]
+
+    # Limit ping sweep size to first 4096 addresses to avoid extremely long runs
+    if len(ip_list) > 4096:
+        ip_list = ip_list[:4096]
+
+    def ping_check(ip: str):
+        try:
+            res = subprocess.run(["ping", "-c", "1", "-W", "1", ip],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            return ip if res.returncode == 0 else None
+        except Exception:
+            return None
+
+    alive = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as ex:
+        for r in ex.map(ping_check, ip_list):
+            if r:
+                alive.append(r)
+    return sorted(alive)
+
+
+
+
+
+
+
+
 
 
 def ping_silent(ip):
