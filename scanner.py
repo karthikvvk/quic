@@ -82,47 +82,86 @@ def gethostlist():
 
 
 # ----------------- Linux scanning integration ----------------- #
+# def scanfromlinux():
+#     """Scan network using multiple methods on Linux (no sudo required).
+#     Returns: list of IPs that are up (List[str]) — no extra parsing; uses env values.
+#     """
+#     global gateway, cidr, file_path
+
+#     checkfile()
+
+#     # Validate env values
+#     if not gateway:
+#         print("[!] GATEWAY not set in environment (GATEWAY).", file=os.sys.stderr)
+#         return []
+#     try:
+#         network = f"{gateway}/{cidr}"
+#         # Validate network by constructing IPv4Network
+#         IPv4Network(network, strict=False)
+#     except Exception as e:
+#         print(f"[!] Invalid network from GATEWAY/CIDR: {e}", file=os.sys.stderr)
+#         return []
+
+#     # Methods to try in order
+#     methods = [
+#         ("nmap_unprivileged", _scan_nmap_unprivileged),
+#         ("arp_neigh", _scan_arp_table),
+#         ("ping_sweep", _scan_ping_sweep),
+#     ]
+
+#     for name, func in methods:
+#         try:
+#             found = func(network)
+#             if found:
+#                 # update file and return the list
+#                 append_host(found)
+#                 return found
+#         except Exception as e:
+#             # keep trying other methods on any failure
+#             print(f"[!] {name} failed: {e}", file=os.sys.stderr)
+#             continue
+
+#     # nothing found
+#     return []
+
+
 def scanfromlinux():
-    """Scan network using multiple methods on Linux (no sudo required).
-    Returns: list of IPs that are up (List[str]) — no extra parsing; uses env values.
+
+    print("[*] Scanning network using nmap...")
+    """
+    Scan network on Linux using only nmap (no sudo required if nmap is allowed
+    to use TCP connect scan). Returns list of IPs that are up (List[str]).
     """
     global gateway, cidr, file_path
 
     checkfile()
 
-    # Validate env values
     if not gateway:
         print("[!] GATEWAY not set in environment (GATEWAY).", file=os.sys.stderr)
         return []
+
     try:
-        network = f"{gateway}/{cidr}"
-        # Validate network by constructing IPv4Network
-        IPv4Network(network, strict=False)
+        network = str(gateway) + "/" + str(cidr)
+        _ = IPv4Network(network, strict=False)
     except Exception as e:
-        print(f"[!] Invalid network from GATEWAY/CIDR: {e}", file=os.sys.stderr)
+        print("[!] Invalid network from GATEWAY/CIDR: " + str(e), file=os.sys.stderr)
         return []
 
-    # Methods to try in order
-    methods = [
-        ("nmap_unprivileged", _scan_nmap_unprivileged),
-        ("arp_neigh", _scan_arp_table),
-        ("ping_sweep", _scan_ping_sweep),
-    ]
+    try:
+        found_ips = _scan_nmap_unprivileged(network)
+    except Exception as e:
+        print("[!] nmap scan failed: " + str(e), file=os.sys.stderr)
+        return []
 
-    for name, func in methods:
-        try:
-            found = func(network)
-            if found:
-                # update file and return the list
-                append_host(found)
-                return found
-        except Exception as e:
-            # keep trying other methods on any failure
-            print(f"[!] {name} failed: {e}", file=os.sys.stderr)
-            continue
+    if not found_ips:
+        print("[*] nmap did not find any hosts")
+        return []
 
-    # nothing found
-    return []
+    append_host(found_ips)
+    return found_ips
+
+
+
 
 
 def _scan_nmap_unprivileged(network: str, ports: str = "22,80,443,445", timeout: int = 120) -> List[str]:
