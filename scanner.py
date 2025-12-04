@@ -135,7 +135,7 @@ def _scan_nmap_unprivileged(network: str, ports: str = "22,80,443,445", timeout:
             # nmap not installed
             return []
 
-        args = ["nmap", "-Pn", "-sT", "-p", ports, "-T4", "--open", network]
+        args = ["nmap", "-sn", "-PR", network]
         # Run with a timeout to avoid hanging
         result = subprocess.check_output(args, text=True, stderr=subprocess.STDOUT, timeout=timeout)
 
