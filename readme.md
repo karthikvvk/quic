@@ -1,9 +1,3 @@
-Here is a **clean, professional, user-friendly README.md** for your project, based on the folder structure and the installation/usage steps you provided.
-
-I have **NOT invented any logic** beyond what you said — only formatted and clarified it.
-
----
-
 # **QUIC File Transfer System**
 
 A lightweight QUIC-based file transfer system using Python, Flask, and Streamlit.
@@ -14,7 +8,9 @@ This project enables fast, direct file transfers within a local network using QU
 ## **📂 Project Structure**
 
 ```
-.
+.File Sharing application or can also said as Wrapper protocol that leverage the power of QUIC by reducing TCP HOL
+
+
 ├── server.py           # QUIC sender & receiver
 ├── client.py           # TCP communicator
 ├── scanner.py          # Local network scanner
