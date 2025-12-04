@@ -147,8 +147,6 @@ def get_OS_TYPE(REMOTE_HOST=""):
 
 
 
-
-# Alternative: Add retry logic in the transfer endpoint
 @app.route('/transfer', methods=['POST'])
 def transfer():
     """
@@ -171,12 +169,14 @@ def transfer():
         if not dest:
             return jsonify({"error": "dest (destination file path) is required"}), 400
 
+        # Validate source file exists
         if not os.path.exists(src):
             return jsonify({"error": f"Source file not found: {src}"}), 404
         
         if not os.path.isfile(src):
             return jsonify({"error": f"Source is not a file: {src}"}), 400
 
+        # Read file data
         try:
             with open(src, "rb") as f:
                 filedata = f.read()
@@ -185,28 +185,45 @@ def transfer():
         except Exception as e:
             return jsonify({"error": f"Failed to read file: {str(e)}"}), 500
 
+        # Load environment variables
         try:
             env = load_env_vars()
         except Exception as e:
             return jsonify({"error": f"Failed to load environment: {str(e)}"}), 500
         
-        dest_host = env.get("dest_host") or env.get("dest")
+        # Get destination host - try multiple keys
+        dest_host = data.get("dest_host")  # Allow override from request
         if not dest_host:
-            return jsonify({"error": "dest_host not configured in environment"}), 500
+            dest_host = env.get("dest_host") or env.get("DEST_HOST") or env.get("dest")
         
-        port_str = env.get("port")
+        if not dest_host:
+            return jsonify({
+                "error": "dest_host not configured. Set DEST_HOST in .env or provide dest_host in request body",
+                "env_keys": list(env.keys())
+            }), 500
+        
+        # Get port
+        port_str = data.get("port")  # Allow override from request
         if not port_str:
-            return jsonify({"error": "port not configured in environment"}), 500
+            port_str = env.get("port") or env.get("PORT")
+        
+        if not port_str:
+            return jsonify({
+                "error": "port not configured. Set PORT in .env or provide port in request body",
+                "env_keys": list(env.keys())
+            }), 500
         
         try:
             port = int(port_str)
         except ValueError:
             return jsonify({"error": f"Invalid port value: {port_str}"}), 500
         
-        certi = env.get("certi")
+        # Get certificate (optional)
+        certi = env.get("certi") or env.get("CERTI")
 
         print(f"[API] Transfer: {src} -> {dest_host}:{port} -> {dest}")
         print(f"[API] File size: {len(filedata)} bytes")
+        print(f"[API] Certificate: {certi}")
         
         # Retry logic
         last_error = None
@@ -214,6 +231,7 @@ def transfer():
             try:
                 print(f"[API] Transfer attempt {attempt}/{MAX_RETRIES}")
                 
+                # Run async QUIC command
                 asyncio.run(send_quic_command(
                     host=dest_host,
                     port=port,
@@ -233,28 +251,47 @@ def transfer():
                     "attempts": attempt
                 }), 200
                 
+            except ConnectionRefusedError as e:
+                last_error = e
+                error_msg = f"Connection refused to {dest_host}:{port}. Is the QUIC server running?"
+                print(f"[API] Attempt {attempt} failed: {error_msg}")
+                
+            except asyncio.TimeoutError as e:
+                last_error = e
+                error_msg = f"Timeout connecting to {dest_host}:{port}"
+                print(f"[API] Attempt {attempt} failed: {error_msg}")
+                
             except Exception as e:
                 last_error = e
-                print(f"[API] Attempt {attempt} failed: {str(e)}")
-                
-                if attempt < MAX_RETRIES:
-                    print(f"[API] Retrying in {RETRY_DELAY}s...")
-                    import time
-                    time.sleep(RETRY_DELAY)
-                else:
-                    print(f"[API] All {MAX_RETRIES} attempts failed")
+                error_msg = str(e)
+                print(f"[API] Attempt {attempt} failed: {error_msg}")
+                import traceback
+                traceback.print_exc()
+            
+            # Retry delay if not last attempt
+            if attempt < MAX_RETRIES:
+                print(f"[API] Retrying in {RETRY_DELAY}s...")
+                import time
+                time.sleep(RETRY_DELAY)
+            else:
+                print(f"[API] All {MAX_RETRIES} attempts failed")
         
         # If we get here, all retries failed
         return jsonify({
-            "error": f"QUIC transfer failed after {MAX_RETRIES} attempts: {str(last_error)}"
+            "error": f"QUIC transfer failed after {MAX_RETRIES} attempts",
+            "last_error": str(last_error),
+            "dest_host": dest_host,
+            "port": port
         }), 500
 
     except Exception as e:
         print(f"[ERROR] Unexpected error in /transfer: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
+        return jsonify({
+            "error": f"Internal server error: {str(e)}",
+            "type": type(e).__name__
+        }), 500
 
 
 
