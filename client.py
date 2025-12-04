@@ -33,6 +33,7 @@ async def send_quic_command(host, port, cert_verify, command, src="", dest="", f
 
     try:
         async with connect(host, port, configuration=config) as client:
+            print(f"[QUIC] Connected to {host}:{port}, config: {config}, client: {client}")
             stream_id = client._quic.get_next_available_stream_id(is_unidirectional=False)
             
             # Prepare header
