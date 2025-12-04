@@ -35,29 +35,33 @@ def detect_interface():
 
     if sys.startswith("linux"):
         # get a compact ip output with addresses on one line per interface
-        result = subprocess.check_output(["ip", "-o", "addr"], text=True)
-        # lines look like: "2: eth0    inet 172.18.0.2/16 brd 172.18.255.255 scope global eth0\n"
+        out = subprocess.check_output(["ip", "-o", "-4", "addr"], text=True).strip()
+
+        if not out:
+            raise RuntimeError("No IPv4 addresses found (ip returned empty)")
+
         candidates = []
-        for line in result.splitlines():
-            # skip loopback
-            if "LOOPBACK" in line or " lo " in line:
-                continue
-            # extract interface name
-            m = re.match(r'^\d+:\s+([^:]+)\s', line)
+        for line in out.splitlines():
+            # example line:
+            # "2: wlan0    inet 192.168.0.100/24 brd 192.168.0.255 scope global dynamic noprefixroute"
+            # extract interface name and ensure 'inet ' present
+            m = re.match(r'^\d+:\s+([^:\s]+)\s+inet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+)', line)
             if not m:
                 continue
             name = m.group(1)
-            # ignore obvious virtual/docker interfaces
             low = name.lower()
-            if low.startswith(("veth", "docker", "br-", "cni0")):
-                continue
-            # only consider interfaces that have an inet address
-            if "inet " not in line:
+            # ignore loopback and obvious virtual/docker/cni/bridge interfaces
+            if low in ("lo",) or low.startswith(("veth", "docker", "br-", "cni0", "virbr", "vmnet")):
                 continue
             candidates.append(name)
 
-        # prefer ethernet-like predictable names
-        for pref in ("eth", "enp", "ens", "en"):
+        if not candidates:
+            raise RuntimeError("[-] No non-virtual, non-loopback interface with IPv4 address found")
+
+        # preference order (include wireless too)
+        prefs = ("eth", "enp", "ens", "en", "wlan", "wl")
+        interface = None
+        for pref in prefs:
             for c in candidates:
                 if c.startswith(pref):
                     interface = c
@@ -65,21 +69,9 @@ def detect_interface():
             if interface:
                 break
 
-        # otherwise pick the first candidate
-        if not interface and candidates:
-            interface = candidates[0]
-
+        # fallback: first candidate
         if not interface:
-            # as a very last resort, check 'ip a' and pick a non-lo interface name
-            result2 = subprocess.check_output(["ip", "a"], text=True)
-            interfaces = re.findall(r'^\d+:\s+([\w\d\-\_@]+):', result2, re.MULTILINE)
-            for i in interfaces:
-                if i.startswith("lo"):
-                    continue
-                if i.startswith(("veth", "docker", "br-")):
-                    continue
-                interface = i.split('@')[0] if '@' in i else i
-                break
+            interface = candidates[0]
 
         if not interface:
             raise Exception("[-] No Ethernet interface found")
